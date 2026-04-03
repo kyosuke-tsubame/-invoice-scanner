@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>納品書スキャナー</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic', sans-serif;
+  background: #f0ede8;
+  min-height: 100vh;
+  color: #1a1a1a;
+}
+header {
+  background: #1c2340;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+header h1 { color: #fff; font-size: 16px; font-weight: 600; }
+.container { max-width: 640px; margin: 0 auto; padding: 20px 16px 100px; }
+
+.card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 18px;
+  margin-bottom: 14px;
+  border: 1px solid #e4e0da;
+}
+.card-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #999;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.api-row { display: flex; gap: 8px; align-items: center; }
+.api-row input {
+  flex: 1;
+  border: 1.5px solid #ddd;
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 13px;
+  font-family: monospace;
+  background: #fafafa;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.api-row input:focus { border-color: #3b6fd4; }
+.hint { font-size: 11px; color: #aaa; margin-top: 6px; }
+.key-saved { display: flex; align-items: center; gap: 8px; }
+.key-saved span { font-size: 13px; color: #1d9e75; font-weight: 600; }
+
+.btn {
+  padding: 11px 20px;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.15s, transform 0.1s;
+  white-space: nowrap;
+}
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.btn-dark { background: #1c2340; color: #fff; }
+.btn-green { background: #1d9e75; color: #fff; }
+.btn-outline { background: #fff; color: #1c2340; border: 1.5px solid #1c2340; }
+.btn-sm { padding: 8px 14px; font-size: 13px; }
+.btn-full { width: 100%; padding: 14px; font-size: 15px; }
+
+.drop-area {
+  border: 2px dashed #ccc;
+  border-radius: 14px;
+  padding: 32px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: #fafafa;
+}
+.drop-area:hover, .drop-area.drag {
+  background: #eef2ff;
+  border-color: #3b6fd4;
+}
+.drop-icon { font-size: 40px; margin-bottom: 10px; }
+.drop-text { font-size: 13px; color: #888; margin-bottom: 14px; line-height: 1.6; }
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+.preview-card {
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1.5px solid #e4e0da;
+  position: relative;
+  background: #fff;
+}
+.preview-card img { width: 100%; height: 80px; object-fit: cover; display: block; }
+.preview-name {
+  font-size: 10px; color: #888; padding: 4px 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.badge {
+  position: absolute; top: 4px; right: 4px;
+  font-size: 9px; font-weight: 700;
+  padding: 2px 7px; border-radius: 20px;
+}
+.badge-wait { background: #f1f5f9; color: #64748b; }
+.badge-loading { background: #dbeafe; color: #1e40af; }
+.badge-done { background: #dcfce7; color: #166534; }
+.badge-error { background: #fee2e2; color: #991b1b; }
+.remove-btn {
+  position: absolute; top: 4px; left: 4px;
+  background: rgba(0,0,0,0.5); border: none;
+  border-radius: 50%; width: 20px; height: 20px;
+  color: #fff; font-size: 11px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  line-height: 1;
+}
+
+.progress-wrap { margin: 12px 0 4px; }
+.progress-bar { height: 4px; background: #e4e0da; border-radius: 4px; overflow: hidden; }
+.progress-fill { height: 100%; background: #3b6fd4; transition: width 0.3s ease; border-radius: 4px; }
+.progress-label { font-size: 11px; color: #888; margin-top: 4px; text-align: right; }
+
+.actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+
+.result-card {
+  background: #fff;
+  border: 1px solid #e4e0da;
+  border-radius: 14px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.result-header {
+  padding: 12px 16px;
+  background: #f8f7f4;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1px solid #e4e0da;
+  gap: 8px;
+}
+.result-header-left { flex: 1; min-width: 0; }
+.result-filename { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.result-meta { font-size: 11px; color: #888; margin-top: 2px; }
+.result-total { font-weight: 700; font-size: 16px; color: #1d9e75; white-space: nowrap; }
+
+.result-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.result-table th {
+  padding: 8px 10px; background: #f8f7f4;
+  color: #888; font-weight: 600; text-align: left;
+  border-bottom: 1px solid #e4e0da;
+}
+.result-table td { padding: 8px 10px; border-bottom: 1px solid #f0ede8; color: #1a1a1a; }
+.result-table tr:last-child td { border-bottom: none; }
+.result-table .num { text-align: right; }
+.total-row td { font-weight: 700; background: #f0fdf4; color: #166534; }
+.error-row {
+  padding: 12px 16px; background: #fff5f5; border-radius: 10px;
+  font-size: 13px; color: #991b1b; margin-bottom: 10px;
+  border: 1px solid #fecaca;
+}
+.results-title {
+  font-size: 12px; font-weight: 700; color: #888;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  margin: 16px 0 10px;
+}
+.empty-state {
+  text-align: center; padding: 40px 20px;
+  color: #aaa; font-size: 14px;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <span style="font-size:22px">📋</span>
+  <h1>納品書スキャナー</h1>
+</header>
+
+<div class="container">
+
+  <!-- API Key -->
+  <div class="card" id="apiCard">
+    <div class="card-title">Google Vision API キー</div>
+    <div class="api-row">
+      <input type="password" id="apiKeyInput" placeholder="AIza..." autocomplete="off">
+      <button class="btn btn-dark btn-sm" onclick="saveKey()">保存</button>
+    </div>
+    <p class="hint">キーはこのブラウザ内のみに保存されます。外部には送信されません。</p>
+  </div>
+
+  <div class="card" id="apiSaved" style="display:none">
+    <div class="card-title">Google Vision API キー</div>
+    <div class="key-saved">
+      <span>✓ APIキー設定済み</span>
+      <button class="btn btn-outline btn-sm" onclick="resetKey()">変更</button>
+    </div>
+  </div>
+
+  <!-- Upload -->
+  <div class="card">
+    <div class="card-title">納品書をアップロード</div>
+    <div class="drop-area" id="dropArea" onclick="document.getElementById('fileInput').click()">
+      <div class="drop-icon">📷</div>
+      <p class="drop-text">納品書の写真をここにドロップ<br>またはタップして選択</p>
+      <button class="btn btn-outline btn-sm" onclick="event.stopPropagation(); document.getElementById('fileInput').click()">
+        写真を選択
+      </button>
+      <input type="file" id="fileInput" multiple accept="image/*" style="display:none" onchange="addFiles(this.files)">
+    </div>
+
+    <div class="preview-grid" id="previewGrid"></div>
+
+    <div class="progress-wrap" id="progressWrap" style="display:none">
+      <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+      <div class="progress-label" id="progressLabel">0 / 0</div>
+    </div>
+
+    <div class="actions" id="actionsArea" style="display:none">
+      <button class="btn btn-dark" id="scanBtn" onclick="scanAll()">読み取り開始</button>
+      <button class="btn btn-green" id="csvBtn" onclick="downloadCSV()" style="display:none">CSVダウンロード</button>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div id="resultsArea"></div>
+
+</div>
+
+<script>
+let files = [];
+let results = {};
+let apiKey = localStorage.getItem('visionApiKey') || '';
+
+if (apiKey) showKeySaved();
+
+function saveKey() {
+  const val = document.getElementById('apiKeyInput').value.trim();
+  if (!val) return alert('APIキーを入力してください');
+  apiKey = val;
+  localStorage.setItem('visionApiKey', val);
+  showKeySaved();
+}
+function resetKey() {
+  document.getElementById('apiCard').style.display = '';
+  document.getElementById('apiSaved').style.display = 'none';
+  document.getElementById('apiKeyInput').value = '';
+}
+function showKeySaved() {
+  document.getElementById('apiCard').style.display = 'none';
+  document.getElementById('apiSaved').style.display = '';
+}
+
+function addFiles(newFiles) {
+  Array.from(newFiles).forEach(f => {
+    if (!f.type.startsWith('image/')) return;
+    if (files.find(x => x.name === f.name && x.size === f.size)) return;
+    files.push(f);
+  });
+  document.getElementById('fileInput').value = '';
+  renderPreviews();
+  updateActions();
+}
+
+function removeFile(idx) {
+  files.splice(idx, 1);
+  const newR = {};
+  Object.keys(results).forEach(k => {
+    const ki = parseInt(k);
+    if (ki < idx) newR[ki] = results[k];
+    else if (ki > idx) newR[ki - 1] = results[k];
+  });
+  results = newR;
+  renderPreviews();
+  renderResults();
+  updateActions();
+}
+
+function updateActions() {
+  const area = document.getElementById('actionsArea');
+  area.style.display = files.length ? '' : 'none';
+}
+
+function renderPreviews() {
+  const grid = document.getElementById('previewGrid');
+  grid.innerHTML = '';
+  files.forEach((f, i) => {
+    const r = results[i];
+    const status = r ? r.status : 'idle';
+    const url = URL.createObjectURL(f);
+    const badgeMap = { loading: 'badge-loading', done: 'badge-done', error: 'badge-error' };
+    const labelMap = { loading: '読取中', done: '完了', error: 'エラー' };
+    const card = document.createElement('div');
+    card.className = 'preview-card';
+    card.innerHTML = `
+      <img src="${url}" alt="${f.name}">
+      <div class="preview-name">${f.name}</div>
+      ${status !== 'idle' ? `<div class="badge ${badgeMap[status] || 'badge-wait'}">${labelMap[status] || ''}</div>` : ''}
+      <button class="remove-btn" onclick="removeFile(${i})" title="削除">×</button>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+async function fileToBase64(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result.split(',')[1]);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+async function callVisionAPI(file) {
+  if (!apiKey) throw new Error('APIキーが設定されていません');
+  const b64 = await fileToBase64(file);
+  const res = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      requests: [{ image: { content: b64 }, features: [{ type: 'TEXT_DETECTION', maxResults: 1 }] }]
+    })
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error.message);
+  if (data.responses?.[0]?.error) throw new Error(data.responses[0].error.message);
+  const text = data.responses?.[0]?.fullTextAnnotation?.text || '';
+  if (!text) throw new Error('テキストを検出できませんでした');
+  return text;
+}
+
+function parseInvoice(text, filename) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+  const supplierMatch = text.match(/([^\n]+(?:株式会社|有限会社|合同会社|㈱|㈲)[^\n]*)/);
+  const supplier = supplierMatch ? supplierMatch[1].trim().replace(/\s+/g, '') : '';
+
+  const recipientMatch = text.match(/([^\n　]+)\s*様/);
+  const recipient = recipientMatch ? recipientMatch[1].trim() : '';
+
+  const dateMatch = text.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+  const date = dateMatch
+    ? `${dateMatch[1]}-${dateMatch[2].padStart(2,'0')}-${dateMatch[3].padStart(2,'0')}`
+    : '';
+
+  const items = [];
+  lines.forEach(line => {
+    if (line.length < 3) return;
+    const nums = [...line.matchAll(/[\d,，]+/g)].map(m => parseInt(m[0].replace(/[,，]/g, ''))).filter(n => !isNaN(n) && n > 0);
+    if (nums.length < 2) return;
+    const amount = nums[nums.length - 1];
+    if (amount <= 0 || amount > 9999999) return;
+    const price = nums.length >= 3 ? nums[nums.length - 2] : 0;
+    const qty = nums.length >= 3 ? nums[0] : 0;
+    const unitMatch = line.match(/Kg|kg|KG|パック|バック|本|袋|個|枚|ケース|箱/);
+    const unit = unitMatch ? unitMatch[0] : '';
+    const name = line.replace(/[\d,，.\s　]+/g, ' ').replace(/Kg|kg|KG|パック|バック|本|袋|個|枚|ケース|箱/g, '').trim();
+    if (name.length >= 2) {
+      items.push({ name, qty, unit, price, amount });
+    }
+  });
+
+  const totalMatch = text.match(/合計[金額]*\s*[\:：]?\s*([\d,，]+)/);
+  const subtotalMatch = text.match(/小計\s*[\:：]?\s*([\d,，]+)/);
+  const taxMatch = text.match(/消費税\s*[\:：]?\s*([\d,，]+)/);
+
+  const calcTotal = items.reduce((s, it) => s + it.amount, 0);
+  const total = totalMatch ? parseInt(totalMatch[1].replace(/[,，]/g, '')) : calcTotal;
+  const subtotal = subtotalMatch ? parseInt(subtotalMatch[1].replace(/[,，]/g, '')) : total;
+  const tax = taxMatch ? parseInt(taxMatch[1].replace(/[,，]/g, '')) : null;
+
+  return { filename, supplier, recipient, date, items, subtotal, tax, total };
+}
+
+async function scanAll() {
+  if (!apiKey) { alert('APIキーを設定してください'); return; }
+  document.getElementById('scanBtn').disabled = true;
+  document.getElementById('progressWrap').style.display = '';
+
+  let done = 0;
+  for (let i = 0; i < files.length; i++) {
+    if (results[i]?.status === 'done') { done++; continue; }
+    results[i] = { status: 'loading' };
+    renderPreviews();
+    try {
+      const text = await callVisionAPI(files[i]);
+      const data = parseInvoice(text, files[i].name);
+      results[i] = { status: 'done', data };
+    } catch (e) {
+      results[i] = { status: 'error', error: e.message };
+    }
+    done++;
+    const pct = Math.round((done / files.length) * 100);
+    document.getElementById('progressFill').style.width = pct + '%';
+    document.getElementById('progressLabel').textContent = `${done} / ${files.length}`;
+    renderPreviews();
+    renderResults();
+  }
+
+  document.getElementById('scanBtn').disabled = false;
+  const doneCount = Object.values(results).filter(r => r?.status === 'done').length;
+  if (doneCount > 0) document.getElementById('csvBtn').style.display = '';
+}
+
+function renderResults() {
+  const container = document.getElementById('resultsArea');
+  const items = files.map((f, i) => ({ f, r: results[i], i }))
+    .filter(x => x.r?.status === 'done' || x.r?.status === 'error');
+  if (!items.length) { container.innerHTML = ''; return; }
+
+  let html = '<div class="results-title">読み取り結果</div>';
+  items.forEach(({ f, r }) => {
+    if (r.status === 'error') {
+      html += `<div class="error-row">⚠ ${f.name}：${r.error}</div>`;
+      return;
+    }
+    const inv = r.data;
+    const rows = (inv.items || []).map(it => `
+      <tr>
+        <td>${it.name}</td>
+        <td class="num">${it.qty}</td>
+        <td>${it.unit}</td>
+        <td class="num">¥${(it.price||0).toLocaleString()}</td>
+        <td class="num">¥${(it.amount||0).toLocaleString()}</td>
+      </tr>`).join('');
+    html += `
+      <div class="result-card">
+        <div class="result-header">
+          <div class="result-header-left">
+            <div class="result-filename">${f.name}</div>
+            <div class="result-meta">${inv.supplier || '仕入先不明'} → ${inv.recipient || '宛先不明'} | ${inv.date || '日付不明'}</div>
+          </div>
+          <div class="result-total">¥${(inv.total||0).toLocaleString()}</div>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="result-table">
+            <thead><tr><th>商品名</th><th>数量</th><th>単位</th><th>単価</th><th>金額</th></tr></thead>
+            <tbody>
+              ${rows || '<tr><td colspan="5" style="text-align:center;color:#aaa;padding:16px">商品情報を検出できませんでした</td></tr>'}
+              <tr class="total-row">
+                <td colspan="4" class="num">合計金額</td>
+                <td class="num">¥${(inv.total||0).toLocaleString()}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  });
+  container.innerHTML = html;
+}
+
+function downloadCSV() {
+  let csv = '\uFEFF';
+  files.forEach((f, i) => {
+    const r = results[i];
+    if (r?.status !== 'done') return;
+    const inv = r.data;
+    csv += `\n===== ${f.name} =====\n`;
+    csv += `仕入先,${inv.supplier || ''}\n`;
+    csv += `宛先,${inv.recipient || ''}\n`;
+    csv += `納品日,${inv.date || ''}\n\n`;
+    csv += `商品名,数量,単位,単価,金額\n`;
+    (inv.items || []).forEach(it => {
+      csv += `"${it.name}",${it.qty},"${it.unit}",${it.price || ''},${it.amount}\n`;
+    });
+    if (inv.subtotal) csv += `,,,,\n小計,,,, ${inv.subtotal}\n`;
+    if (inv.tax) csv += `消費税,,,, ${inv.tax}\n`;
+    csv += `合計金額,,,, ${inv.total}\n`;
+  });
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `納品書_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+const dropArea = document.getElementById('dropArea');
+dropArea.addEventListener('dragover', e => { e.preventDefault(); dropArea.classList.add('drag'); });
+dropArea.addEventListener('dragleave', () => dropArea.classList.remove('drag'));
+dropArea.addEventListener('drop', e => {
+  e.preventDefault();
+  dropArea.classList.remove('drag');
+  addFiles(e.dataTransfer.files);
+});
+</script>
+</body>
+</html>
