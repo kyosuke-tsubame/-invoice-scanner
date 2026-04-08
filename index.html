@@ -181,6 +181,37 @@ header h1 { color: #fff; font-size: 16px; font-weight: 600; }
   text-align: center; padding: 40px 20px;
   color: #aaa; font-size: 14px;
 }
+
+.store-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+.store-btn {
+  padding: 14px 10px;
+  border: 2px solid #e4e0da;
+  border-radius: 12px;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #1a1a1a;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+.store-btn:hover { border-color: #3b6fd4; background: #eef2ff; }
+.store-btn.selected {
+  border-color: #1c2340;
+  background: #1c2340;
+  color: #fff;
+}
+.store-selected-label {
+  font-size: 13px;
+  color: #1d9e75;
+  font-weight: 600;
+  margin-top: 10px;
+}
 </style>
 </head>
 <body>
@@ -192,22 +223,18 @@ header h1 { color: #fff; font-size: 16px; font-weight: 600; }
 
 <div class="container">
 
-  <!-- API Key -->
-  <div class="card" id="apiCard">
-    <div class="card-title">Google Vision API キー</div>
-    <div class="api-row">
-      <input type="password" id="apiKeyInput" placeholder="AIza..." autocomplete="off">
-      <button class="btn btn-dark btn-sm" onclick="saveKey()">保存</button>
-    </div>
-    <p class="hint">キーはこのブラウザ内のみに保存されます。外部には送信されません。</p>
-  </div>
 
-  <div class="card" id="apiSaved" style="display:none">
-    <div class="card-title">Google Vision API キー</div>
-    <div class="key-saved">
-      <span>✓ APIキー設定済み</span>
-      <button class="btn btn-outline btn-sm" onclick="resetKey()">変更</button>
+  <!-- 店舗選択 -->
+  <div class="card">
+    <div class="card-title">店舗を選択</div>
+    <div class="store-grid">
+      <button class="store-btn" onclick="selectStore('本店')">本店</button>
+      <button class="store-btn" onclick="selectStore('KADODE店')">KADODE店</button>
+      <button class="store-btn" onclick="selectStore('空港店')">空港店</button>
+      <button class="store-btn" onclick="selectStore('静岡紺屋町店')">静岡紺屋町店</button>
+      <button class="store-btn" onclick="selectStore('セントラル')">セントラル</button>
     </div>
+    <div class="store-selected-label" id="storeLabel" style="display:none"></div>
   </div>
 
   <!-- Upload -->
@@ -243,26 +270,19 @@ header h1 { color: #fff; font-size: 16px; font-weight: 600; }
 <script>
 let files = [];
 let results = {};
-let apiKey = localStorage.getItem('visionApiKey') || '';
+let apiKey = 'AIzaSyA-IVuYvdvQ8UXjb57PWuF9bN1KYixLWHc';
+let selectedStore = '';
 
-if (apiKey) showKeySaved();
+function selectStore(name) {
+  selectedStore = name;
+  document.querySelectorAll('.store-btn').forEach(btn => {
+    btn.classList.toggle('selected', btn.textContent === name);
+  });
+  const label = document.getElementById('storeLabel');
+  label.textContent = '✓ ' + name + ' を選択中';
+  label.style.display = '';
+}
 
-function saveKey() {
-  const val = document.getElementById('apiKeyInput').value.trim();
-  if (!val) return alert('APIキーを入力してください');
-  apiKey = val;
-  localStorage.setItem('visionApiKey', val);
-  showKeySaved();
-}
-function resetKey() {
-  document.getElementById('apiCard').style.display = '';
-  document.getElementById('apiSaved').style.display = 'none';
-  document.getElementById('apiKeyInput').value = '';
-}
-function showKeySaved() {
-  document.getElementById('apiCard').style.display = 'none';
-  document.getElementById('apiSaved').style.display = '';
-}
 
 function addFiles(newFiles) {
   Array.from(newFiles).forEach(f => {
