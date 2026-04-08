@@ -412,7 +412,6 @@ async function scanWithGemini(file, filename) {
 
   const res = await fetch(APPS_SCRIPT_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       action: 'scan',
       imageBase64: b64,
@@ -638,7 +637,6 @@ async function sendToSheets() {
   try {
     const res = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'save', rows })
     });
     const data = await res.json();
