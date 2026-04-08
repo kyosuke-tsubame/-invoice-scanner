@@ -328,7 +328,7 @@ select.confirm-field { cursor: pointer; }
 
 <script>
 const STORES = ['本店', 'KADODE店', '空港店', '静岡紺屋町店', 'セントラル'];
-const GEMINI_KEY = 'AIzaSyBI4-sINzWn-aI6BOu_sHzvDBB_F0UClwQ';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxl4ks1XumINgG0HrQqIOxc6j-97DTlTwgRiD64-qUywfBag5q_-zyEa7ywWe5UqDt_/exec';
 
 let files = [];
 let results = {};
@@ -410,43 +410,24 @@ async function scanWithGemini(file, filename) {
   const b64 = await fileToBase64(file);
   const mimeType = file.type || 'image/jpeg';
 
-  const prompt = `これは日本の納品書または請求書の写真です。
-以下の3項目をJSONのみで返してください。説明文は不要です。
-
-{
-  "date": "納品日または発行日をYYYY-MM-DD形式で。不明なら空文字",
-  "supplier": "発行元・売り手の会社名。宛先ではなく納品した側の会社名。不明なら空文字",
-  "total": "税込の合計金額を数字のみ。不明なら0"
-}`;
-
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`, {
+  const res = await fetch(APPS_SCRIPT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      contents: [{
-        parts: [
-          { inline_data: { mime_type: mimeType, data: b64 } },
-          { text: prompt }
-        ]
-      }]
+      action: 'scan',
+      imageBase64: b64,
+      mimeType: mimeType
     })
   });
   const data = await res.json();
-  if (data.error) throw new Error(data.error.message);
-  const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-  const json = raw.replace(/```json\n?|\n?```/g, '').trim();
-  try {
-    const parsed = JSON.parse(json);
-    return {
-      filename,
-      date: parsed.date || '',
-      supplier: parsed.supplier || '',
-      total: parseInt(String(parsed.total).replace(/[,，¥￥\s]/g, '')) || 0,
-      items: []
-    };
-  } catch(e) {
-    return { filename, date: '', supplier: '', total: 0, items: [] };
-  }
+  if (data.error) throw new Error(data.error);
+  return {
+    filename,
+    date: data.date || '',
+    supplier: data.supplier || '',
+    total: data.total || 0,
+    items: []
+  };
 }
 
 async function scanAll() {
@@ -637,8 +618,48 @@ function removeSplit(cidx, sidx) {
 
 
 
-function sendToSheets() {
-  alert('スプシ送信機能は準備中です');
+async function sendToSheets() {
+  const btn = document.querySelector('.btn-green.btn-full');
+  btn.disabled = true;
+  btn.textContent = '送信中...';
+
+  const rows = [];
+  confirmData.forEach(cd => {
+    cd.splits.forEach(sp => {
+      rows.push({
+        date: cd.date,
+        store: sp.store,
+        supplier: cd.supplier,
+        total: Number(sp.amount) || 0
+      });
+    });
+  });
+
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save', rows })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    alert('スプレッドシートに保存しました！');
+    // リセット
+    files = [];
+    results = {};
+    confirmData = [];
+    selectedStore = '';
+    document.querySelectorAll('.store-btn').forEach(b => b.classList.remove('selected'));
+    document.getElementById('storeLabel').style.display = 'none';
+    document.getElementById('previewGrid').innerHTML = '';
+    document.getElementById('actionsArea').style.display = 'none';
+    document.getElementById('progressWrap').style.display = 'none';
+    document.getElementById('resultsArea').innerHTML = '';
+  } catch(e) {
+    alert('エラーが発生しました：' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'スプシに送信';
+  }
 }
 
 // ── ドラッグ&ドロップ ─────────────────────
