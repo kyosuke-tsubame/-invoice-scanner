@@ -635,8 +635,8 @@ async function sendToSheets() {
       method: 'POST',
       body: JSON.stringify({ action: 'save', rows })
     });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
+    const text = await res.text();
+    if (text.includes('error')) throw new Error(text);
     alert('スプレッドシートに保存しました！');
     // リセット
     files = [];
