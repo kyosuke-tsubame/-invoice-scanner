@@ -507,6 +507,7 @@ function buildConfirmData() {
       filename: f.name,
       date: inv.date || '',
       supplier: inv.supplier || '',
+      ocrSupplier: inv.supplier || '',
       rawTotal,
       taxType,
       taxRate,
@@ -615,7 +616,10 @@ function renderConfirm() {
                   ${supplierList.length > 0 ? `<button class="tax-btn" onclick="setSupplierMode(${cidx},'select')">一覧</button>` : ''}
                 </div>`
               : `<select class="confirm-field" onchange="onSupplierSelect(${cidx},this.value)">
-                  ${sortedSuppliers(cd.supplier).map(s => `<option value="${esc(s)}" ${s === cd.supplier ? 'selected' : ''}>${esc(s)}</option>`).join('')}
+                  <option value="${esc(cd.ocrSupplier)}" ${cd.supplier === cd.ocrSupplier ? 'selected' : ''}>${esc(cd.ocrSupplier) || '（読み取り結果なし）'}</option>
+                  <option disabled>──────────</option>
+                  ${sortedSuppliers(cd.ocrSupplier).filter(s => s !== cd.ocrSupplier).map(s => `<option value="${esc(s)}" ${s === cd.supplier ? 'selected' : ''}>${esc(s)}</option>`).join('')}
+                  <option disabled>──────────</option>
                   <option value="__manual__">✏ 手入力する</option>
                 </select>`
             }
