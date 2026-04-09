@@ -471,7 +471,8 @@ function buildConfirmData() {
       supplier: inv.supplier || '',
       total: inv.total || 0,
       items: inv.items || [],
-      splits: [{ store: selectedStore, amount: inv.total || 0 }]
+      splits: [{ store: selectedStore, amount: inv.total || 0 }],
+      category: '仕入れ'
     };
   }).filter(Boolean);
 }
@@ -550,10 +551,17 @@ function renderConfirm() {
             <input class="confirm-field" type="date" value="${cd.date}"
               oninput="updateField(${cidx},'date',this.value)">
           </div>
-          <div class="confirm-row" style="margin-bottom:0">
+          <div class="confirm-row">
             <label class="confirm-label">仕入先</label>
             <input class="confirm-field" type="text" value="${esc(cd.supplier)}"
               oninput="updateField(${cidx},'supplier',this.value)">
+          </div>
+          <div class="confirm-row" style="margin-bottom:0">
+            <label class="confirm-label">区分</label>
+            <select class="confirm-field" onchange="updateField(${cidx},'category',this.value)">
+              <option value="仕入れ" ${cd.category === '仕入れ' ? 'selected' : ''}>仕入れ</option>
+              <option value="消耗品" ${cd.category === '消耗品' ? 'selected' : ''}>消耗品</option>
+            </select>
           </div>
           ${cd.items.length ? `
           <details style="margin-top:12px">
@@ -630,7 +638,8 @@ async function sendToSheets() {
         date: cd.date,
         store: sp.store,
         supplier: cd.supplier,
-        total: Number(sp.amount) || 0
+        total: Number(sp.amount) || 0,
+        category: cd.category || ''
       });
     });
   });
