@@ -344,6 +344,34 @@ let files = [];
 let results = {};
 let selectedStore = '';
 let confirmData = [];
+let supplierList = [];
+
+async function fetchSuppliers() {
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'getSuppliers' })
+    });
+    const data = await res.json();
+    if (data.suppliers) supplierList = data.suppliers;
+  } catch(e) {}
+}
+
+function supplierSimilarity(ocr, name) {
+  if (!ocr || !name) return 0;
+  const a = ocr.replace(/\s/g, '');
+  const b = name.replace(/\s/g, '');
+  if (b.includes(a) || a.includes(b)) return 1;
+  let matches = 0;
+  for (let i = 0; i < a.length; i++) {
+    if (b.includes(a[i])) matches++;
+  }
+  return matches / Math.max(a.length, b.length);
+}
+
+function sortedSuppliers(ocr) {
+  return [...supplierList].sort((a, b) => supplierSimilarity(ocr, b) - supplierSimilarity(ocr, a));
+}
 
 // ── 店舗選択 ──────────────────────────────
 function selectStore(name) {
@@ -485,7 +513,8 @@ function buildConfirmData() {
       total,
       items: inv.items || [],
       splits: [{ store: selectedStore, amount: total }],
-      category: '仕入れ'
+      category: '仕入れ',
+      supplierMode: supplierList.length > 0 ? 'select' : 'manual'
     };
   }).filter(Boolean);
 }
@@ -579,8 +608,17 @@ function renderConfirm() {
           </div>
           <div class="confirm-row">
             <label class="confirm-label">仕入先</label>
-            <input class="confirm-field" type="text" value="${esc(cd.supplier)}"
-              oninput="updateField(${cidx},'supplier',this.value)">
+            ${cd.supplierMode === 'manual' || supplierList.length === 0
+              ? `<div style="display:flex;gap:6px;align-items:center">
+                  <input class="confirm-field" type="text" value="${esc(cd.supplier)}"
+                    oninput="updateField(${cidx},'supplier',this.value)" style="flex:1">
+                  ${supplierList.length > 0 ? `<button class="tax-btn" onclick="setSupplierMode(${cidx},'select')">一覧</button>` : ''}
+                </div>`
+              : `<select class="confirm-field" onchange="onSupplierSelect(${cidx},this.value)">
+                  ${sortedSuppliers(cd.supplier).map(s => `<option value="${esc(s)}" ${s === cd.supplier ? 'selected' : ''}>${esc(s)}</option>`).join('')}
+                  <option value="__manual__">✏ 手入力する</option>
+                </select>`
+            }
           </div>
           <div class="confirm-row" style="margin-bottom:0">
             <label class="confirm-label">区分</label>
@@ -619,6 +657,21 @@ function esc(str) {
 
 function updateField(cidx, field, value) {
   confirmData[cidx][field] = value;
+}
+
+function onSupplierSelect(cidx, value) {
+  if (value === '__manual__') {
+    confirmData[cidx].supplierMode = 'manual';
+    confirmData[cidx].supplier = '';
+    renderConfirm();
+  } else {
+    confirmData[cidx].supplier = value;
+  }
+}
+
+function setSupplierMode(cidx, mode) {
+  confirmData[cidx].supplierMode = mode;
+  renderConfirm();
 }
 
 function toggleTax(cidx, newTaxType) {
@@ -721,6 +774,8 @@ dropArea.addEventListener('drop', e => {
   dropArea.classList.remove('drag');
   addFiles(e.dataTransfer.files);
 });
+
+fetchSuppliers();
 </script>
 </body>
 </html>
