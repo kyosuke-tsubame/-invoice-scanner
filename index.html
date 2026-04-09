@@ -143,6 +143,11 @@ header h1 { color: #fff; font-size: 16px; font-weight: 600; }
 .result-header-left { flex: 1; min-width: 0; }
 .result-filename { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .result-total { font-weight: 700; font-size: 16px; color: #1d9e75; white-space: nowrap; }
+.tax-label { font-size: 11px; color: #888; font-weight: 400; }
+.tax-warning { color: #d32f2f; font-size: 12px; margin-top: 4px; font-weight: 600; }
+.tax-toggle { display: flex; gap: 4px; justify-content: flex-end; margin-top: 4px; }
+.tax-btn { font-size: 12px; padding: 2px 10px; border-radius: 12px; border: 1px solid #ccc; background: #f5f5f5; color: #555; cursor: pointer; }
+.tax-btn-active { background: #1d9e75; color: #fff; border-color: #1d9e75; }
 
 .result-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .result-table th {
@@ -426,6 +431,7 @@ async function scanWithGemini(file, filename) {
     date: data.date || '',
     supplier: data.supplier || '',
     total: data.total || 0,
+    tax_type: data.tax_type || 'unknown',
     items: []
   };
 }
@@ -464,14 +470,19 @@ function buildConfirmData() {
     const r = results[i];
     if (r?.status !== 'done') return null;
     const inv = r.data;
+    const taxType = inv.tax_type || 'unknown';
+    const rawTotal = inv.total || 0;
+    const total = taxType === 'included' ? Math.floor(rawTotal / 1.1) : rawTotal;
     return {
       idx: i,
       filename: f.name,
       date: inv.date || '',
       supplier: inv.supplier || '',
-      total: inv.total || 0,
+      rawTotal,
+      taxType,
+      total,
       items: inv.items || [],
-      splits: [{ store: selectedStore, amount: inv.total || 0 }],
+      splits: [{ store: selectedStore, amount: total }],
       category: '仕入れ'
     };
   }).filter(Boolean);
@@ -533,13 +544,23 @@ function renderConfirm() {
         <td class="num">¥${(it.amount||0).toLocaleString()}</td>
       </tr>`).join('');
 
+    const taxWarning = (cd.taxType === 'included' || cd.taxType === 'unknown')
+      ? `<div class="tax-warning">⚠ OCRで税込または不明でした。確認してください。</div>` : '';
+
     html += `
       <div class="result-card">
         <div class="result-header">
           <div class="result-header-left">
             <div class="result-filename">${esc(cd.filename)}</div>
+            ${taxWarning}
           </div>
-          <div class="result-total">¥${cd.total.toLocaleString()}</div>
+          <div style="text-align:right">
+            <div class="result-total">¥${cd.total.toLocaleString()} <span class="tax-label">税抜</span></div>
+            <div class="tax-toggle">
+              <button class="tax-btn ${cd.taxType === 'excluded' ? 'tax-btn-active' : ''}" onclick="toggleTax(${cidx},'excluded')">税抜</button>
+              <button class="tax-btn ${cd.taxType === 'included' ? 'tax-btn-active' : ''}" onclick="toggleTax(${cidx},'included')">税込</button>
+            </div>
+          </div>
         </div>
         <div class="confirm-body">
           ${splitRows}
@@ -593,6 +614,14 @@ function esc(str) {
 
 function updateField(cidx, field, value) {
   confirmData[cidx][field] = value;
+}
+
+function toggleTax(cidx, newTaxType) {
+  const cd = confirmData[cidx];
+  cd.taxType = newTaxType;
+  cd.total = newTaxType === 'included' ? Math.floor(cd.rawTotal / 1.1) : cd.rawTotal;
+  cd.splits = [{ store: cd.splits[0]?.store || selectedStore, amount: cd.total }];
+  renderConfirm();
 }
 
 function updateSplitStore(cidx, sidx, value) {
