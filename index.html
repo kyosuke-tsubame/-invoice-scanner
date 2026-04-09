@@ -472,7 +472,8 @@ function buildConfirmData() {
     const inv = r.data;
     const taxType = inv.tax_type || 'unknown';
     const rawTotal = inv.total || 0;
-    const total = taxType === 'included' ? Math.floor(rawTotal / 1.1) : rawTotal;
+    const taxRate = 10;
+    const total = taxType === 'included' ? Math.floor(rawTotal / (1 + taxRate / 100)) : rawTotal;
     return {
       idx: i,
       filename: f.name,
@@ -480,6 +481,7 @@ function buildConfirmData() {
       supplier: inv.supplier || '',
       rawTotal,
       taxType,
+      taxRate,
       total,
       items: inv.items || [],
       splits: [{ store: selectedStore, amount: total }],
@@ -559,6 +561,9 @@ function renderConfirm() {
             <div class="tax-toggle">
               <button class="tax-btn ${cd.taxType === 'excluded' ? 'tax-btn-active' : ''}" onclick="toggleTax(${cidx},'excluded')">税抜</button>
               <button class="tax-btn ${cd.taxType === 'included' ? 'tax-btn-active' : ''}" onclick="toggleTax(${cidx},'included')">税込</button>
+              ${cd.taxType === 'included' ? `
+              <button class="tax-btn ${cd.taxRate === 10 ? 'tax-btn-active' : ''}" onclick="toggleTaxRate(${cidx},10)">10%</button>
+              <button class="tax-btn ${cd.taxRate === 8 ? 'tax-btn-active' : ''}" onclick="toggleTaxRate(${cidx},8)">8%</button>` : ''}
             </div>
           </div>
         </div>
@@ -619,7 +624,15 @@ function updateField(cidx, field, value) {
 function toggleTax(cidx, newTaxType) {
   const cd = confirmData[cidx];
   cd.taxType = newTaxType;
-  cd.total = newTaxType === 'included' ? Math.floor(cd.rawTotal / 1.1) : cd.rawTotal;
+  cd.total = newTaxType === 'included' ? Math.floor(cd.rawTotal / (1 + cd.taxRate / 100)) : cd.rawTotal;
+  cd.splits = [{ store: cd.splits[0]?.store || selectedStore, amount: cd.total }];
+  renderConfirm();
+}
+
+function toggleTaxRate(cidx, rate) {
+  const cd = confirmData[cidx];
+  cd.taxRate = rate;
+  cd.total = Math.floor(cd.rawTotal / (1 + rate / 100));
   cd.splits = [{ store: cd.splits[0]?.store || selectedStore, amount: cd.total }];
   renderConfirm();
 }
