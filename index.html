@@ -303,6 +303,8 @@ select.confirm-field { cursor: pointer; }
       <button class="store-btn" onclick="selectStore('空港店')">空港店</button>
       <button class="store-btn" onclick="selectStore('静岡紺屋町店')">静岡紺屋町店</button>
       <button class="store-btn" onclick="selectStore('セントラル')">セントラル</button>
+      <button class="store-btn" onclick="selectStore('冷凍事業部')">冷凍事業部</button>
+      <button class="store-btn" onclick="selectStore('製麺事業部')">製麺事業部</button>
     </div>
     <div class="store-selected-label" id="storeLabel" style="display:none"></div>
   </div>
@@ -337,7 +339,7 @@ select.confirm-field { cursor: pointer; }
 </div>
 
 <script>
-const STORES = ['本店', 'KADODE店', '空港店', '静岡紺屋町店', 'セントラル'];
+const STORES = ['本店', 'KADODE店', '空港店', '静岡紺屋町店', 'セントラル', '冷凍事業部', '製麺事業部'];
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxl4ks1XumINgG0HrQqIOxc6j-97DTITwgRiD64-qUywfBag5q_-zyEa7ywWe5UqDt_/exec';
 
 let files = [];
