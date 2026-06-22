@@ -347,6 +347,16 @@ let results = {};
 let selectedStore = '';
 let confirmData = [];
 let supplierList = [];
+let wakeLock = null;
+
+async function acquireWakeLock() {
+  if ('wakeLock' in navigator) {
+    try { wakeLock = await navigator.wakeLock.request('screen'); } catch(e) {}
+  }
+}
+function releaseWakeLock() {
+  if (wakeLock) { wakeLock.release(); wakeLock = null; }
+}
 
 async function fetchSuppliers() {
   try {
@@ -470,6 +480,7 @@ async function scanAll() {
   if (!selectedStore) { alert('先に店舗を選択してください'); return; }
   document.getElementById('scanBtn').disabled = true;
   document.getElementById('progressWrap').style.display = '';
+  await acquireWakeLock();
 
   let done = 0;
   for (let i = 0; i < files.length; i++) {
@@ -489,6 +500,7 @@ async function scanAll() {
     renderPreviews();
   }
 
+  releaseWakeLock();
   document.getElementById('scanBtn').disabled = false;
   buildConfirmData();
   renderConfirm();
@@ -730,7 +742,7 @@ function removeSplit(cidx, sidx) {
 async function sendToSheets() {
   const btn = document.querySelector('.btn-green.btn-full');
   btn.disabled = true;
-  btn.textContent = '送信中...';
+  btn.textContent = '確認中...';
 
   const rows = [];
   confirmData.forEach(cd => {
@@ -744,6 +756,32 @@ async function sendToSheets() {
       });
     });
   });
+
+  // 重複チェック
+  try {
+    const dupRes = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'checkDuplicate', rows })
+    });
+    const dupData = await dupRes.json();
+    if (dupData.duplicates && dupData.duplicates.length > 0) {
+      const list = dupData.duplicates.map(d =>
+        `・${d.date} / ${d.store} / ¥${Number(d.total).toLocaleString()}`
+      ).join('\n');
+      const ok = confirm(
+        `⚠ 重複の可能性があります\n\n以下のデータが既に登録されています：\n${list}\n\nそれでも保存しますか？`
+      );
+      if (!ok) {
+        btn.disabled = false;
+        btn.textContent = 'スプシに送信';
+        return;
+      }
+    }
+  } catch(e) {
+    // チェック失敗時はそのまま続行
+  }
+
+  btn.textContent = '送信中...';
 
   try {
     const res = await fetch(APPS_SCRIPT_URL, {
