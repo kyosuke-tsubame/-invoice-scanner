@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>納品書アップロード</title>
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" type="image/png" href="icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="納品書アップロード">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic', sans-serif;
+  background: #f0ede8;
+  min-height: 100vh;
+  color: #1a1a1a;
+}
+header {
+  background: #1c2340;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+header h1 { color: #fff; font-size: 16px; font-weight: 600; }
+.container { max-width: 640px; margin: 0 auto; padding: 20px 16px 100px; }
+
+.card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 18px;
+  margin-bottom: 14px;
+  border: 1px solid #e4e0da;
+}
+.card-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #999;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.btn {
+  padding: 11px 20px;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.15s, transform 0.1s;
+  white-space: nowrap;
+}
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.btn-dark { background: #1c2340; color: #fff; }
+.btn-green { background: #1d9e75; color: #fff; }
+.btn-outline { background: #fff; color: #1c2340; border: 1.5px solid #1c2340; }
+.btn-sm { padding: 8px 14px; font-size: 13px; }
+.btn-full { width: 100%; padding: 14px; font-size: 15px; }
+
+.signin-box { text-align: center; padding: 12px 4px; }
+.signin-icon { font-size: 40px; margin-bottom: 10px; }
+.signin-text { font-size: 13px; color: #888; margin-bottom: 16px; line-height: 1.6; }
+.account-label {
+  font-size: 12px; color: #1d9e75; font-weight: 600;
+  text-align: center; margin-bottom: 4px;
+}
+.signout-link {
+  display: block; text-align: center; font-size: 11px; color: #aaa;
+  margin-top: 8px; cursor: pointer; text-decoration: underline;
+}
+
+.drop-area {
+  border: 2px dashed #ccc;
+  border-radius: 14px;
+  padding: 32px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: #fafafa;
+}
+.drop-area:hover, .drop-area.drag {
+  background: #eef2ff;
+  border-color: #3b6fd4;
+}
+.drop-icon { font-size: 40px; margin-bottom: 10px; }
+.drop-text { font-size: 13px; color: #888; margin-bottom: 14px; line-height: 1.6; }
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+.preview-card {
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1.5px solid #e4e0da;
+  position: relative;
+  background: #fff;
+}
+.preview-card img { width: 100%; height: 80px; object-fit: cover; display: block; }
+.preview-name {
+  font-size: 10px; color: #888; padding: 4px 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.badge {
+  position: absolute; top: 4px; right: 4px;
+  font-size: 9px; font-weight: 700;
+  padding: 2px 7px; border-radius: 20px;
+}
+.badge-wait { background: #f1f5f9; color: #64748b; }
+.badge-loading { background: #dbeafe; color: #1e40af; }
+.badge-done { background: #dcfce7; color: #166534; }
+.badge-error { background: #fee2e2; color: #991b1b; }
+.remove-btn {
+  position: absolute; top: 4px; left: 4px;
+  background: rgba(0,0,0,0.5); border: none;
+  border-radius: 50%; width: 20px; height: 20px;
+  color: #fff; font-size: 11px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  line-height: 1;
+}
+
+.progress-wrap { margin: 12px 0 4px; }
+.progress-bar { height: 4px; background: #e4e0da; border-radius: 4px; overflow: hidden; }
+.progress-fill { height: 100%; background: #3b6fd4; transition: width 0.3s ease; border-radius: 4px; }
+.progress-label { font-size: 11px; color: #888; margin-top: 4px; text-align: right; }
+
+.actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+
+.error-row {
+  padding: 12px 16px; background: #fff5f5; border-radius: 10px;
+  font-size: 13px; color: #991b1b; margin-bottom: 10px;
+  border: 1px solid #fecaca;
+}
+.done-box {
+  text-align: center; padding: 24px 4px;
+}
+.done-icon { font-size: 40px; margin-bottom: 10px; }
+.done-text { font-size: 14px; color: #1d9e75; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header>
+  <span style="font-size:22px">📮</span>
+  <h1>納品書アップロード</h1>
+</header>
+
+<div class="container">
+
+  <!-- サインイン -->
+  <div class="card" id="signinCard">
+    <div class="signin-box">
+      <div class="signin-icon">🔐</div>
+      <p class="signin-text">写真を送るには、最初に一度だけ<br>サインインしてください</p>
+      <button class="btn btn-dark" id="signinBtn" onclick="signIn()">Microsoftアカウントでサインイン</button>
+    </div>
+  </div>
+
+  <!-- アップロード（サインイン後に表示） -->
+  <div class="card" id="uploadCard" style="display:none">
+    <div class="account-label" id="accountLabel"></div>
+    <div class="card-title">納品書をアップロード</div>
+    <div class="drop-area" id="dropArea" onclick="document.getElementById('fileInput').click()">
+      <div class="drop-icon">📷</div>
+      <p class="drop-text">納品書の写真をここにドロップ<br>またはタップして選択</p>
+      <button class="btn btn-outline btn-sm" onclick="event.stopPropagation(); document.getElementById('fileInput').click()">
+        写真を選択
+      </button>
+      <input type="file" id="fileInput" multiple accept="image/*" style="display:none" onchange="addFiles(this.files)">
+    </div>
+
+    <div class="preview-grid" id="previewGrid"></div>
+
+    <div class="progress-wrap" id="progressWrap" style="display:none">
+      <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+      <div class="progress-label" id="progressLabel">0 / 0</div>
+    </div>
+
+    <div class="actions" id="actionsArea" style="display:none">
+      <button class="btn btn-green btn-full" id="sendBtn" onclick="sendAll()">送信する</button>
+    </div>
+
+    <div id="errorArea"></div>
+    <div id="doneArea"></div>
+
+    <div class="signout-link" onclick="signOut()">別のアカウントでサインインし直す</div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
+<script>
+// ── 設定 ──────────────────────────────────
+const FOLDER_ITEM_ID = 'E017E7B2128EB245!sf8c49dc880e6429885bc31cfb295eeca'; // 受信箱フォルダ
+const GRAPH_SCOPES = ['Files.ReadWrite'];
+
+const msalConfig = {
+  auth: {
+    clientId: '534bb9d0-a31c-4cd9-9486-7fe29205785a',
+    authority: 'https://login.microsoftonline.com/consumers',
+    redirectUri: 'https://kyosuke-tsubame.github.io/-invoice-scanner/upload.html'
+  },
+  cache: {
+    cacheLocation: 'localStorage'
+  }
+};
+const msalInstance = new msal.PublicClientApplication(msalConfig);
+
+let account = null;
+let files = [];
+let fileStatus = {}; // idx -> 'wait' | 'loading' | 'done' | 'error'
+
+// ── サインイン ────────────────────────────
+async function initAuth() {
+  await msalInstance.initialize();
+  const accounts = msalInstance.getAllAccounts();
+  if (accounts.length > 0) {
+    account = accounts[0];
+    showSignedIn();
+  }
+}
+
+async function signIn() {
+  const btn = document.getElementById('signinBtn');
+  btn.disabled = true;
+  btn.textContent = 'サインイン中...';
+  try {
+    const result = await msalInstance.loginPopup({ scopes: GRAPH_SCOPES });
+    account = result.account;
+    showSignedIn();
+  } catch (e) {
+    alert('サインインに失敗しました。もう一度お試しください。');
+    btn.disabled = false;
+    btn.textContent = 'Microsoftアカウントでサインイン';
+  }
+}
+
+function signOut() {
+  files = [];
+  fileStatus = {};
+  msalInstance.logoutRedirect({ account });
+}
+
+function showSignedIn() {
+  document.getElementById('signinCard').style.display = 'none';
+  document.getElementById('uploadCard').style.display = '';
+  document.getElementById('accountLabel').textContent = '✓ ' + (account.username || 'サインイン済み');
+}
+
+async function getAccessToken() {
+  const request = { scopes: GRAPH_SCOPES, account };
+  try {
+    const result = await msalInstance.acquireTokenSilent(request);
+    return result.accessToken;
+  } catch (e) {
+    const result = await msalInstance.acquireTokenPopup(request);
+    return result.accessToken;
+  }
+}
+
+// ── ファイル操作 ──────────────────────────
+function addFiles(newFiles) {
+  Array.from(newFiles).forEach(f => {
+    if (!f.type.startsWith('image/')) return;
+    if (files.find(x => x.name === f.name && x.size === f.size)) return;
+    files.push(f);
+  });
+  document.getElementById('fileInput').value = '';
+  document.getElementById('doneArea').innerHTML = '';
+  renderPreviews();
+  updateActions();
+}
+
+function removeFile(idx) {
+  files.splice(idx, 1);
+  const newS = {};
+  Object.keys(fileStatus).forEach(k => {
+    const ki = parseInt(k);
+    if (ki < idx) newS[ki] = fileStatus[k];
+    else if (ki > idx) newS[ki - 1] = fileStatus[k];
+  });
+  fileStatus = newS;
+  renderPreviews();
+  updateActions();
+}
+
+function updateActions() {
+  document.getElementById('actionsArea').style.display = files.length ? '' : 'none';
+}
+
+function renderPreviews() {
+  const grid = document.getElementById('previewGrid');
+  grid.innerHTML = '';
+  files.forEach((f, i) => {
+    const status = fileStatus[i];
+    const url = URL.createObjectURL(f);
+    const badgeMap = { loading: 'badge-loading', done: 'badge-done', error: 'badge-error' };
+    const labelMap = { loading: '送信中', done: '完了', error: 'エラー' };
+    const card = document.createElement('div');
+    card.className = 'preview-card';
+    card.innerHTML = `
+      <img src="${url}" alt="${esc(f.name)}">
+      <div class="preview-name">${esc(f.name)}</div>
+      ${status ? `<div class="badge ${badgeMap[status] || 'badge-wait'}">${labelMap[status] || ''}</div>` : ''}
+      ${status !== 'done' ? `<button class="remove-btn" onclick="removeFile(${i})" title="削除">×</button>` : ''}
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function esc(str) {
+  return String(str || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── ファイル名の重複対策 ──────────────────
+function pad(n) { return String(n).padStart(2, '0'); }
+
+function generateUniqueFilename(originalName) {
+  const m = originalName.match(/\.[^.]+$/);
+  const ext = m ? m[0] : '';
+  const base = m ? originalName.slice(0, -ext.length) : originalName;
+  const now = new Date();
+  const ts = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `${ts}_${rand}_${base}${ext}`;
+}
+
+// ── OneDriveへ送信 ────────────────────────
+async function uploadFileToOneDrive(file, filename, accessToken) {
+  const createUrl = `https://graph.microsoft.com/v1.0/me/drive/items/${FOLDER_ITEM_ID}:/${encodeURIComponent(filename)}:/createUploadSession`;
+  const sessionRes = await fetch(createUrl, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'rename' } })
+  });
+  if (!sessionRes.ok) throw new Error('送信の準備に失敗しました');
+  const session = await sessionRes.json();
+  const uploadUrl = session.uploadUrl;
+
+  const chunkSize = 3932160; // Graph APIの仕様（327,680の倍数）に合わせたチャンクサイズ
+  const total = file.size;
+  let start = 0;
+
+  while (start < total) {
+    const end = Math.min(start + chunkSize, total);
+    const chunk = file.slice(start, end);
+    const res = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Length': String(end - start),
+        'Content-Range': `bytes ${start}-${end - 1}/${total}`
+      },
+      body: chunk
+    });
+    if (!res.ok && res.status !== 202) {
+      throw new Error('写真の送信に失敗しました');
+    }
+    start = end;
+  }
+}
+
+async function sendAll() {
+  const btn = document.getElementById('sendBtn');
+  btn.disabled = true;
+  document.getElementById('progressWrap').style.display = '';
+  document.getElementById('errorArea').innerHTML = '';
+
+  let accessToken;
+  try {
+    accessToken = await getAccessToken();
+  } catch (e) {
+    document.getElementById('errorArea').innerHTML =
+      `<div class="error-row">⚠ サインインの確認に失敗しました。電波の良い場所でもう一度お試しください。</div>`;
+    btn.disabled = false;
+    return;
+  }
+
+  let done = 0;
+  const toSend = files.map((f, i) => i).filter(i => fileStatus[i] !== 'done');
+  let hasError = false;
+
+  for (const i of toSend) {
+    fileStatus[i] = 'loading';
+    renderPreviews();
+    try {
+      const filename = generateUniqueFilename(files[i].name);
+      await uploadFileToOneDrive(files[i], filename, accessToken);
+      fileStatus[i] = 'done';
+    } catch (e) {
+      fileStatus[i] = 'error';
+      hasError = true;
+    }
+    done++;
+    const pct = Math.round((done / toSend.length) * 100);
+    document.getElementById('progressFill').style.width = pct + '%';
+    document.getElementById('progressLabel').textContent = `${done} / ${toSend.length}`;
+    renderPreviews();
+  }
+
+  btn.disabled = false;
+
+  if (hasError) {
+    document.getElementById('errorArea').innerHTML =
+      `<div class="error-row">⚠ 一部の写真の送信に失敗しました。電波の良い場所でもう一度お試しください（成功した写真はそのまま残ります）。</div>`;
+  } else {
+    document.getElementById('doneArea').innerHTML = `
+      <div class="done-box">
+        <div class="done-icon">✅</div>
+        <div class="done-text">送信が完了しました！</div>
+      </div>`;
+    files = [];
+    fileStatus = {};
+    document.getElementById('previewGrid').innerHTML = '';
+    document.getElementById('progressWrap').style.display = 'none';
+    updateActions();
+  }
+}
+
+// ── ドラッグ&ドロップ ─────────────────────
+const dropArea = document.getElementById('dropArea');
+dropArea.addEventListener('dragover', e => { e.preventDefault(); dropArea.classList.add('drag'); });
+dropArea.addEventListener('dragleave', () => dropArea.classList.remove('drag'));
+dropArea.addEventListener('drop', e => {
+  e.preventDefault();
+  dropArea.classList.remove('drag');
+  addFiles(e.dataTransfer.files);
+});
+
+initAuth();
+</script>
+</body>
+</html>
