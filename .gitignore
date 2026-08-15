@@ -1,0 +1,3 @@
+automation/logs/
+automation/invoice_ocr_state.json
+automation/invoice_sort_processed.txt
