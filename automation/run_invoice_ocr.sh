@@ -9,8 +9,8 @@ PHOTOS_ROOT="$ONEDRIVE_ROOT/納品書写真"
 STATE_FILE="$PROJECT_DIR/invoice_ocr_state.json"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 LOG_FILE="$LOG_DIR/invoice_ocr_$TIMESTAMP.log"
-WEBAPP_URL="https://kyosuke-tsubame.github.io/-invoice-scanner/"
-CALL_GAS_SCRIPT="$PROJECT_DIR/call_gas.py"
+LEDGER_SCRIPT="$PROJECT_DIR/invoice_ledger.py"
+LEDGER_XLSX="$ONEDRIVE_ROOT/納品書集計/納品書集計.xlsx"
 
 mkdir -p "$LOG_DIR"
 cd "$PROJECT_DIR"
@@ -38,14 +38,14 @@ for store in "${STORES[@]}"; do
 done
 unsetopt nullglob
 
-ALLOWED_TOOLS="Read,Write,Edit,Bash(python3 ${CALL_GAS_SCRIPT}:*),mcp__mail-secretary__notify_slack"
+ALLOWED_TOOLS="Read,Write,Edit,Bash(python3 ${LEDGER_SCRIPT}:*),mcp__mail-secretary__notify_slack"
 
 PROMPT="【実行環境について】
 これは夜間バッチによる完全無人の自動実行です。あなたへの応答者は存在しません。
 『実行してよいですか？』のような確認・質問は一切せず、判定が終わり次第そのまま実行してください（確認質問を出すと、誰も答えられないため処理がそこで停止してしまいます）。
 
 【目的】
-ラーメン店7店舗が共有フォルダ（OneDrive）にアップロードした納品書の写真を読み取り、内容に自信がある分だけGoogleスプレッドシートに自動記帳する。自信が持てない分はスプレッドシートに書かず、Slackで1通にまとめて報告し、既存のWebアプリ（${WEBAPP_URL}）で人が直す運用にする。
+ラーメン店7店舗が共有フォルダ（OneDrive）にアップロードした納品書の写真を読み取り、内容に自信がある分だけExcel台帳（${LEDGER_XLSX}）に自動記帳する。自信が持てない分は記帳せず、Slackで1通にまとめて報告する。報告を見た人が、OneDrive上の元写真を直接確認し、同じExcelファイルに手入力で追記する運用にする（専用の修正アプリは使わない）。
 
 【対象フォルダ】
 ${PHOTOS_ROOT}/<店舗名>/ ＝ 店舗名は次の7つ：${STORE_LIST_TEXT}
@@ -53,7 +53,7 @@ ${PHOTOS_ROOT}/<店舗名>/ ＝ 店舗名は次の7つ：${STORE_LIST_TEXT}
 
 【状態ファイル】
 ${STATE_FILE}
-このJSONファイルで処理状況を管理する。キーは画像ファイルの絶対パス、値は以下の形のオブジェクト：
+このJSONファイルで処理状況を管理する。キーは画像ファイルの絶対パス、値は以下の形のオブジェクト（statusはExcelへの記帳状況を表す）：
 {
   \"status\": \"auto_saved\" | \"held_for_review\",
   \"store\": \"<店舗フォルダ名>\",
@@ -85,13 +85,13 @@ ${STATE_FILE}
 上記のどれにも該当しなければ、手順3の重複チェックに進む。
 
 【手順3：重複チェック】
-自動保存候補になった画像について、以下のコマンドで重複を確認する（curlはGoogle側にブロックされるためpython3経由の専用スクリプトを使うこと）：
-python3 ${CALL_GAS_SCRIPT} checkDuplicate '{\"rows\":[{\"date\":\"<date>\",\"store\":\"<store>\",\"total\":<total>}]}'
-返ってきたJSONの duplicates 配列に1件でも要素があれば、この画像は\"held_for_review\"に変更し、note に「重複の可能性」と記録する。重複が無ければ手順4に進む。
+自動保存候補になった画像について、以下のコマンドで重複を確認する：
+python3 ${LEDGER_SCRIPT} check '{\"date\":\"<date>\",\"store\":\"<store>\",\"total\":<total>}'
+返ってきたJSONの duplicate が true なら、この画像は\"held_for_review\"に変更し、note に「重複の可能性」と記録する。重複が無ければ手順4に進む。
 
 【手順4：記帳】
-以下のコマンドでスプレッドシートに追記する：
-python3 ${CALL_GAS_SCRIPT} save '{\"rows\":[{\"date\":\"<date>\",\"store\":\"<store>\",\"supplier\":\"<supplier>\",\"total\":<total>,\"category\":\"仕入れ\"}]}'
+以下のコマンドでExcel台帳に追記する（データシートへの追記と、店舗別集計シートの作り直しを両方このスクリプトが行う）：
+python3 ${LEDGER_SCRIPT} add '{\"date\":\"<date>\",\"store\":\"<store>\",\"supplier\":\"<supplier>\",\"total\":<total>,\"category\":\"仕入れ\"}'
 成功したら状態ファイルにこの画像を status \"auto_saved\" として記録する（note は空欄）。
 
 【手順5：Slack報告】
@@ -99,8 +99,8 @@ ${PHOTOS_ROOT}/不明/ に入っている画像の件数を数える（店舗が
 今回処理した画像が1件以上、または不明フォルダに1件以上あれば、mcp__mail-secretary__notify_slackで1通だけ報告する。
 見出しは『【納品書OCR】』とする。
 自動記帳した分：店舗・日付・仕入先・金額を一覧で。
-要確認になった分：店舗・ファイル名・読み取れた範囲の内容（分かる範囲でよい）・保留理由を一覧で、『Webアプリ（${WEBAPP_URL}）で該当の写真を読み込み直して手動で保存してください』と添える。
-不明フォルダに画像がある場合：件数を伝え、『店舗が自動判定できませんでした。OneDriveの「納品書写真/不明」フォルダを開いて、正しい店舗フォルダへ手動で移動するか、Webアプリで直接記帳してください』と添える。
+要確認になった分：店舗・ファイル名・読み取れた範囲の内容（分かる範囲でよい）・保留理由を一覧で、『OneDriveの元写真を確認のうえ、Excel台帳（納品書写真と同じOneDrive内、「納品書集計/納品書集計.xlsx」）に直接1行追記してください』と添える。
+不明フォルダに画像がある場合：件数を伝え、『店舗が自動判定できませんでした。OneDriveの「納品書写真/不明」フォルダを開いて、正しい店舗フォルダへ手動で移動するか、Excel台帳に直接記帳してください』と添える。
 返信は不要な旨（『返信不要です。読み取りが違う場合だけ教えてください』程度）を添える。
 今回処理した画像が0件、かつ不明フォルダも0件なら、手順5は何もしない（新規0件の日は通知しない）。
 
