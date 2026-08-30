@@ -221,11 +221,25 @@ let files = [];
 let fileStatus = {}; // idx -> 'wait' | 'loading' | 'done' | 'error'
 
 // ── サインイン ────────────────────────────
+// スマホ（特にiPhone）では別窓（ポップアップ）方式のサインイン確認が
+// ブロックされて失敗しやすいため、画面遷移（リダイレクト）方式を使う。
 async function initAuth() {
   await msalInstance.initialize();
-  const accounts = msalInstance.getAllAccounts();
-  if (accounts.length > 0) {
-    account = accounts[0];
+  try {
+    const redirectResult = await msalInstance.handleRedirectPromise();
+    if (redirectResult && redirectResult.account) {
+      account = redirectResult.account;
+    }
+  } catch (e) {
+    // サインインし直しからの戻りで失敗した場合は、通常のサインイン画面を出す
+  }
+  if (!account) {
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length > 0) {
+      account = accounts[0];
+    }
+  }
+  if (account) {
     showSignedIn();
   }
 }
@@ -235,9 +249,8 @@ async function signIn() {
   btn.disabled = true;
   btn.textContent = 'サインイン中...';
   try {
-    const result = await msalInstance.loginPopup({ scopes: GRAPH_SCOPES });
-    account = result.account;
-    showSignedIn();
+    await msalInstance.loginRedirect({ scopes: GRAPH_SCOPES });
+    // loginRedirectは画面遷移するため、ここには到達しない
   } catch (e) {
     alert('サインインに失敗しました。もう一度お試しください。');
     btn.disabled = false;
@@ -263,8 +276,10 @@ async function getAccessToken() {
     const result = await msalInstance.acquireTokenSilent(request);
     return result.accessToken;
   } catch (e) {
-    const result = await msalInstance.acquireTokenPopup(request);
-    return result.accessToken;
+    // 別窓（ポップアップ）方式はスマホでブロックされやすいため、
+    // 画面遷移（リダイレクト）でサインインし直す。遷移するのでここには戻ってこない。
+    await msalInstance.acquireTokenRedirect(request);
+    return null;
   }
 }
 
@@ -387,6 +402,10 @@ async function sendAll() {
     document.getElementById('errorArea').innerHTML =
       `<div class="error-row">⚠ サインインの確認に失敗しました。電波の良い場所でもう一度お試しください。</div>`;
     btn.disabled = false;
+    return;
+  }
+  if (!accessToken) {
+    // サインインし直しの画面へ遷移中（通常はページがここで離脱する）
     return;
   }
 
