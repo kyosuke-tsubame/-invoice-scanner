@@ -3,7 +3,12 @@ set -uo pipefail
 
 PROJECT_DIR="$HOME/Claude/invoice-scanner/automation"
 LOG_DIR="$PROJECT_DIR/logs"
-CLAUDE_BIN="$HOME/.local/bin/claude"
+# 2026-09-07変更：Claude本体はバージョンごとにファイル名が変わるため、更新のたびに
+# macOSの「OneDriveで管理されているファイルにアクセスしようとしています」確認が復活し、
+# 応答者のいない夜間バッチが固まってタイムアウトしていた。名前が変わらない固定パスのコピーを使う。
+"$HOME/Claude/scripts/sync_claude_bin.sh" >/dev/null 2>&1
+CLAUDE_BIN="$HOME/Claude/bin/claude"
+[ -x "$CLAUDE_BIN" ] || CLAUDE_BIN="$HOME/.local/bin/claude"
 ONEDRIVE_ROOT="$HOME/Library/CloudStorage/OneDrive-個人用"
 PHOTOS_ROOT="$ONEDRIVE_ROOT/納品書写真"
 STATE_FILE="$PROJECT_DIR/invoice_ocr_state.json"
@@ -235,6 +240,47 @@ done
 
 # ログイン切れ等で失敗していたら、Claudeを介さず直接Slackへ警告する
 "$HOME/Claude/scripts/notify_claude_login_issue.sh" "納品書OCR" "$LOG_FILE" "$OVERALL_EXIT"
+
+# 2026-09-06追加：滞留状況（未処理・要確認・不明）を、AIの成否に関係なく必ず確認して通知する。
+# AI呼び出し自体がフリーズ・失敗すると、AI自身のSlack報告も実行されず滞留に気付けなくなるため、
+# シェル側だけで完結する形で毎回チェックする（0件なら何も通知しない）。
+BACKLOG_MSG=$(python3 -c "
+import json, glob, os
+
+STATE_FILE = '$STATE_FILE'
+PHOTOS_ROOT = '$PHOTOS_ROOT'
+STORES = ['本店', 'KADODE店', '空港店', '静岡紺屋町店', 'セントラル', '冷凍事業部', '製麺事業部']
+
+with open(STATE_FILE) as f:
+    state = json.load(f)
+
+all_images = []
+for store in STORES:
+    d = os.path.join(PHOTOS_ROOT, store)
+    for ext in ('*.jpg', '*.jpeg', '*.png', '*.JPG', '*.JPEG', '*.PNG'):
+        all_images.extend(glob.glob(os.path.join(d, '**', ext), recursive=True))
+unprocessed = [p for p in all_images if p not in state]
+
+held = [k for k, v in state.items() if v.get('status') == 'held_for_review']
+
+unknown_dir = os.path.join(PHOTOS_ROOT, '不明')
+unknown = []
+if os.path.isdir(unknown_dir):
+    for ext in ('*.jpg', '*.jpeg', '*.png', '*.JPG', '*.JPEG', '*.PNG'):
+        unknown.extend(glob.glob(os.path.join(unknown_dir, ext)))
+
+lines = []
+if unprocessed:
+    lines.append(f'・未処理（まだ読み取られていない新着）: {len(unprocessed)}件')
+if held:
+    lines.append(f'・要確認のまま放置: {len(held)}件')
+if unknown:
+    lines.append(f'・不明フォルダ（店舗判定不能）: {len(unknown)}件')
+
+if lines:
+    print('【納品書OCR 滞留状況】\n' + '\n'.join(lines) + '\n\nOneDriveの「納品書写真」フォルダをご確認ください。')
+")
+"$HOME/Claude/scripts/notify_backlog.sh" "C0BRBFZ2N6R" "$BACKLOG_MSG"
 
 echo "done: $(date)" >> "$LOG_DIR/last_run_invoice_ocr.log"
 
