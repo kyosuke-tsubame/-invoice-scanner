@@ -156,3 +156,27 @@ Google Cloud Vision APIを動かすためにクレジットカード登録が必
 5. GitHub Pagesに更新をデプロイ
 
 スプレッドシートIDは実装時にユーザーから取得する。
+
+---
+
+## Mac miniによる自動化（2026-08-11〜）
+
+撮影以外の全工程（読み取り〜記帳）をMac miniで自動化する仕組みを追加した。
+Webアプリ（本ファイル冒頭の仕組み）は廃止せず、自動化が「要確認」と判断したものだけを人が直す**例外対応用**として残している。
+
+### 仕組み
+- 店舗スタッフがOneDriveの共有フォルダ（店舗ごとのサブフォルダ）に納品書写真をアップロード
+- Mac miniのlaunchdが夜間に1日1回、`automation/run_invoice_ocr.sh`を自動実行
+- 読み取りはGoogle Cloud Vision APIやGemini APIではなく、**Claude Code自身（`claude -p`のヘッドレス実行）が画像を直接読む**（新しい外部OCR課金は増やしていない）
+- 記帳は既存のApps Script（`save`/`checkDuplicate`エンドポイント）をそのまま呼び出す（Apps Script側は無改修）
+- 自信が持てない読み取り（日付・仕入先が空、税込／税率不明、重複の疑い）は記帳せず、Slackに1通で報告。スタッフはそこで案内される既存Webアプリでその1枚だけ手動修正する
+
+### 関連ファイル
+- `automation/run_invoice_ocr.sh` … 本体スクリプト（`FAX仕分け`プロジェクトの`run_report_ocr.sh`と同じパターンを踏襲）
+- `automation/invoice_ocr_state.json` … 処理済みファイルの記録（二重記帳防止。gitignore対象）
+- `automation/logs/` … 実行ログ（gitignore対象）
+- `~/Library/LaunchAgents/com.menyatsubame.invoice-ocr.plist` … 起動スケジュール（毎日21:00）
+- 写真の保存先：`~/Library/CloudStorage/OneDrive-個人用/納品書写真/<店舗名>/`（7店舗分のフォルダ作成済み）
+
+### 店舗スタッフ側で必要な設定（未実施）
+各店舗の業務用スマホから、上記OneDriveのその店舗のフォルダへ写真が自動または手動で届くようにする設定（カメラロール自動バックアップ等）。この設定が完了するまで、自動化は「対象フォルダに何も無い＝処理0件」の状態が続く。

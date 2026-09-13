@@ -6,6 +6,9 @@
 
 詳細は invoice-scanner-handoff.md を参照。
 
+## 作業前のルール
+- 作業を始める前に必ず `git pull origin main` で最新化すること
+
 ## 対象店舗
 本店 / KADODE店 / 空港店 / 静岡紺屋町店 / セントラル
 

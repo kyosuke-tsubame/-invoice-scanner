@@ -74,6 +74,36 @@ else
 fi
 rm -f "$ALL_IMAGES_FILE" "$UNPROCESSED_FILE"
 
+# 2026-09-12追加：OneDriveの「クラウドのみ（未ダウンロード）」状態の写真は、開いた瞬間に
+# ダウンロードが始まるが、夜間は間に合わずEDEADLKエラーで読めないことがある。
+# これが原因で、中身に問題がないのに「要確認」へ回された写真が24枚溜まっていた。
+# ここで先に読み込んで実体化させ、待っても読めない写真は今回の対象から外す
+# （状態ファイルに記録しないので、翌日また自動で対象になる）。
+if [ ${#TARGET_FILES[@]} -gt 0 ]; then
+  NOT_READY=("${TARGET_FILES[@]}")
+  for wait_sec in 0 30 60; do
+    [ ${#NOT_READY[@]} -eq 0 ] && break
+    [ "$wait_sec" -gt 0 ] && sleep "$wait_sec"
+    STILL=()
+    for f in "${NOT_READY[@]}"; do
+      cat "$f" > /dev/null 2>&1 || STILL+=("$f")
+    done
+    NOT_READY=("${STILL[@]}")
+  done
+
+  if [ ${#NOT_READY[@]} -gt 0 ]; then
+    READY_FILES=()
+    for f in "${TARGET_FILES[@]}"; do
+      skip=0
+      for n in "${NOT_READY[@]}"; do [ "$f" = "$n" ] && skip=1 && break; done
+      [ "$skip" -eq 0 ] && READY_FILES+=("$f")
+    done
+    SKIPPED_NOT_READY=${#NOT_READY[@]}
+    TARGET_FILES=("${READY_FILES[@]}")
+  fi
+fi
+SKIPPED_NOT_READY=${SKIPPED_NOT_READY:-0}
+
 # 不明フォルダ（店舗が自動判定できなかった画像）の件数もシェル側で先に数えておく
 UNKNOWN_DIR="$PHOTOS_ROOT/不明"
 UNKNOWN_COUNT=0
@@ -90,9 +120,67 @@ BATCH_COUNT=$(( TOTAL == 0 ? 1 : (TOTAL + BATCH_SIZE - 1) / BATCH_SIZE ))
 
 # 「python3 invoice_ledger.py ...」（絶対パス省略の短い書き方）でAIが実行しても許可リストに一致するよう、
 # 絶対パス・ファイル名のみの両方のパターンを許可しておく（2026-09-01：絶対パスのみだと夜間実行で毎回承認待ちになる不具合の対策）
-ALLOWED_TOOLS="Read,Write,Edit,Bash(python3 ${LEDGER_SCRIPT}:*),Bash(python3 invoice_ledger.py:*),Bash(python3 ./invoice_ledger.py:*),mcp__mail-secretary__notify_slack,mcp__mail-secretary__list_slack_replies"
+# 2026-09-13追加：仕入先名を名寄せ表（27社）の正式名称に揃える。
+# 仕分け側（run_invoice_sort.sh）にだけ入れていたため、台帳の仕入先欄が伝票の表記のまま
+# 書き込まれ、「マルフク」と「株式会社マルフク」が並ぶ状態に戻ってしまっていた。
+SUPPLIER_NAME_DOC="$HOME/Claude/Obsidian/kyosuke-brain/AI/reference/仕入先の正式名称_対応表.md"
+SUPPLIER_NAMES_BLOCK=""
+if [ -f "$SUPPLIER_NAME_DOC" ]; then
+  SUPPLIER_NAMES_TEXT=$(python3 -c "
+import re,sys
+doc=open(sys.argv[1],encoding='utf-8').read()
+out=[]
+for name,al in re.findall(r'^\\|\\s*([^|\\s][^|]*?)\\s*\\|\\s*([^|]*?)\\s*\\|\\s*\$',doc,re.M):
+    if name=='正式名称' or set(name)<=set('-― '):
+        continue
+    al=al.strip()
+    if al and al!='－':
+        out.append('・'+name+'（納品書に「'+al+'」と書かれていても '+name+' にする）')
+    else:
+        out.append('・'+name)
+print(chr(10).join(out))
+" "$SUPPLIER_NAME_DOC")
+  if [ -n "$SUPPLIER_NAMES_TEXT" ]; then
+    SUPPLIER_NAMES_BLOCK="
+【最重要：台帳に書く仕入先名は必ず下の正式名称リストに揃える】
+納品書上の表記（株式会社・有限会社の有無、支店名、旧字体）がどうであっても、
+リストのどれかに該当するなら必ずリストの正式名称をそのまま使うこと。
+支店名（例：『木村商事株式会社 焼津支店』）は支店名を落として本体名（木村商事）にする。
+${SUPPLIER_NAMES_TEXT}
+リストのどれにも当てはまらない新しい仕入先の場合だけ、読み取れたままの社名を使い、
+最後の報告に『リストに無い仕入先：<社名>』と明記すること。似た名前に勝手に寄せないこと。
+"
+  fi
+else
+  echo "警告: 仕入先の名寄せ表が見つかりません（$SUPPLIER_NAME_DOC）" >> "$LOG_DIR/last_run_invoice_ocr.log"
+fi
+
+VALIDATE_SCRIPT="$PROJECT_DIR/validate_entry.py"
+
+# 2026-09-13追加：人が確認画面で残した「読み取りのコツ・注意点」を毎晩読み込んでAIに渡す。
+# 誤読を見つけた人がその場でメモを書けば、次の晩から同じ間違いを繰り返しにくくなる。
+# きっかけ：小松菜45袋を35袋と読み違え、4,500円が3,500円として記録されていた（別伝票と
+# 同額に見えたため重複扱いになり、8/5分が丸ごと記帳から漏れていた）。
+READING_MEMO_FILE="$PROJECT_DIR/仕入先_読み取りメモ.txt"
+READING_MEMO_BLOCK=""
+if [ -f "$READING_MEMO_FILE" ]; then
+  READING_MEMO_TEXT=$(grep -v '^#' "$READING_MEMO_FILE" | grep -v '^[[:space:]]*$')
+  if [ -n "$READING_MEMO_TEXT" ]; then
+    READING_MEMO_BLOCK="
+【仕入先ごとの読み取りの注意点（過去に人が見つけた間違いのメモ）】
+これは実際に読み違えが起きた箇所の記録です。該当する仕入先の納品書を読むときは必ず目を通し、
+同じ間違いをしないよう、書かれている箇所を特に注意深く確認すること。
+${READING_MEMO_TEXT}
+"
+  fi
+fi
+
+ALLOWED_TOOLS="Read,Write,Edit,Bash(python3 ${LEDGER_SCRIPT}:*),Bash(python3 invoice_ledger.py:*),Bash(python3 ./invoice_ledger.py:*),Bash(python3 ${VALIDATE_SCRIPT}:*),Bash(python3 validate_entry.py:*),mcp__mail-secretary__notify_slack,mcp__mail-secretary__list_slack_replies"
 
 echo "=== 開始: $(date) （対象${TOTAL}件を${BATCH_SIZE}件ずつ${BATCH_COUNT}グループに分けて処理） ===" > "$LOG_FILE"
+if [ "$SKIPPED_NOT_READY" -gt 0 ]; then
+  echo "警告: OneDriveから取得できず今回は見送った写真 ${SKIPPED_NOT_READY}枚（要確認にはせず、次回また対象になります）" >> "$LOG_FILE"
+fi
 
 OVERALL_EXIT=0
 BATCH_NUM=0
@@ -174,7 +262,7 @@ ${STEP0_TEXT}
 ${STEP1_INTRO}
 各画像について、Readで直接開いて日本語の納品書として次を読み取る：
 - date：納品日（YYYY-MM-DD形式。読めなければ空文字）
-- supplier：仕入先の会社名（読めなければ空文字）
+- supplier：仕入先の会社名（読めなければ空文字）\n${READING_MEMO_BLOCK}\n${SUPPLIER_NAMES_BLOCK}
 - total と taxType：税抜金額（税抜金額）が明記されていればそれをtotalとし、taxTypeを\"excluded\"とする。税込金額（税込金額）が明記されていればそれをtotalとし、taxTypeを\"included\"とする。\n  消費税欄に具体的な税額・税込金額の記載が無く、『軽減8%』『8%』『10%』のような税率表記だけ、または0円・空欄の場合は、記載されている金額（対象額・小計・合計など）をtotalとし、taxTypeを\"excluded\"として扱う（税抜金額として記帳する、という会社の運用ルール）。\n  上記のいずれにも当てはまらない場合（手書きで金額自体が判読できない等、金額そのものが読み取れない場合）のみtaxTypeを\"unknown\"とする。
 - store：画像が入っていたフォルダ名をそのまま使う
 
@@ -195,6 +283,21 @@ python3 ${LEDGER_SCRIPT} check '{\"date\":\"<date>\",\"store\":\"<store>\",\"tot
 
 【手順4：記帳】
 以下のコマンドでExcel台帳に追記する（データシートへの追記と、店舗別集計シートの作り直しを両方このスクリプトが行う）：
+【記帳の直前に必ず検算する（省略禁止）】
+自動保存してよいと判断した1件ごとに、記帳コマンドの前に必ず次を実行すること。
+
+python3 ${VALIDATE_SCRIPT} check '{\"date\":\"<date>\",\"store\":\"<store>\",\"supplier\":\"<supplier>\",\"total\":<total>}'
+
+結果の見方：
+- \"level\":\"OK\"    → そのまま記帳してよい
+- \"level\":\"注意\"  → 記帳してよいが、reasonsの内容を最後の報告に必ず書く
+- \"level\":\"要確認\" → **記帳してはいけない**。状態ファイルに\"held_for_review\"として記録し、
+                     noteにreasonsの内容をそのまま書く。Slack報告にも含める
+
+この検算は、AIの読み取りが正しいかを過去データと突き合わせて機械的に確かめるもの。
+自分の判断に自信があっても必ず通すこと（2026-09-13に、自信ありとして記帳された行に
+店舗の誤りが混ざっていたことが判明したため導入した）。
+
 python3 ${LEDGER_SCRIPT} add '{\"date\":\"<date>\",\"store\":\"<store>\",\"supplier\":\"<supplier>\",\"total\":<total>,\"category\":\"仕入れ\"}'
 成功したら状態ファイルにこの画像を status \"auto_saved\" として記録する（note は空欄、processedAt は現在時刻）。
 
@@ -237,6 +340,16 @@ ${STEP5_TEXT}
 
   i=$((END + 1))
 done
+
+# 2026-09-13追加：記帳がすべて終わったあとに、見やすい集計表（納品書_集計表.xlsx）を作り直す。
+# 台帳は読むだけで書き換えない。失敗しても記帳・Slack通知など他の処理は止めず、ログに残すだけにする。
+SUMMARY_SCRIPT="$HOME/Claude/invoice-scanner/build_summary_xlsx.py"
+echo "--- 集計表の作り直し開始: $(date) ---" >> "$LOG_FILE"
+if python3 "$SUMMARY_SCRIPT" >> "$LOG_FILE" 2>&1; then
+  echo "--- 集計表の作り直し完了: $(date) ---" >> "$LOG_FILE"
+else
+  echo "--- 警告: 集計表の作り直しに失敗しました（記帳には影響なし）: $(date) ---" >> "$LOG_FILE"
+fi
 
 # ログイン切れ等で失敗していたら、Claudeを介さず直接Slackへ警告する
 "$HOME/Claude/scripts/notify_claude_login_issue.sh" "納品書OCR" "$LOG_FILE" "$OVERALL_EXIT"

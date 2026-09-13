@@ -59,6 +59,38 @@ if [ ${#TARGET_FILES[@]} -eq 0 ]; then
   exit 0
 fi
 
+# 2026-09-12追加：OneDriveの「クラウドのみ（未ダウンロード）」状態の写真は、開いた瞬間に
+# ダウンロードが始まるが、夜間は間に合わずEDEADLKエラーで読めないことがある。
+# ここで先に読み込んで実体化させ、待っても読めない写真は今回の対象から外す
+# （処理済みにもしないので翌日また自動で対象になる。要確認には回さない）。
+NOT_READY=("${TARGET_FILES[@]}")
+for wait_sec in 0 30 60; do
+  [ ${#NOT_READY[@]} -eq 0 ] && break
+  [ "$wait_sec" -gt 0 ] && sleep "$wait_sec"
+  STILL=()
+  for f in "${NOT_READY[@]}"; do
+    cat "$f" > /dev/null 2>&1 || STILL+=("$f")
+  done
+  NOT_READY=("${STILL[@]}")
+done
+
+if [ ${#NOT_READY[@]} -gt 0 ]; then
+  READY_FILES=()
+  for f in "${TARGET_FILES[@]}"; do
+    skip=0
+    for n in "${NOT_READY[@]}"; do [ "$f" = "$n" ] && skip=1 && break; done
+    [ "$skip" -eq 0 ] && READY_FILES+=("$f")
+  done
+  echo "警告: OneDriveから取得できず今回は見送った写真 ${#NOT_READY[@]}枚（処理済みにしないので次回また対象になります） ($(date))" >> "$LOG_FILE"
+  printf '  見送り: %s\n' "${NOT_READY[@]}" >> "$LOG_FILE"
+  TARGET_FILES=("${READY_FILES[@]}")
+fi
+
+if [ ${#TARGET_FILES[@]} -eq 0 ]; then
+  echo "エラー: $(date) - 対象写真がすべてOneDriveから取得できませんでした（OneDriveアプリの再起動が必要な可能性があります）。ファイルは動かしていません" >> "$LOG_DIR/last_run_invoice_sort.log"
+  exit 1
+fi
+
 FILE_LIST=$(printf '%s\n' "${TARGET_FILES[@]}")
 
 MOVE_SCRIPT="$PROJECT_DIR/move_sorted.py"
@@ -66,7 +98,77 @@ SUPPLIER_MAP_FILE="$PROJECT_DIR/仕入先_店舗マップ.txt"
 MIHON_DIR="$PROJECT_DIR/見本"
 ALLOWED_TOOLS="Read,Bash(python3 ${MOVE_SCRIPT}:*)"
 
-SUPPLIER_MAP_RULES=$(cat "$SUPPLIER_MAP_FILE")
+# 「!」始まりの行は「店舗を自動判定しない仕入先」なので、通常の対応表からは除いて別扱いにする
+SUPPLIER_MAP_RULES=$(grep -v '^!' "$SUPPLIER_MAP_FILE" | grep -v '^>')
+REBILL_RULES=$(grep '^>' "$SUPPLIER_MAP_FILE" | sed 's/^>//')
+
+# 店舗ごとの住所・目印。住所8770を本店と決めつける誤りを防ぐ注意書きもここに入っている
+STORE_ADDR_FILE="$PROJECT_DIR/店舗_住所マップ.txt"
+if [ -f "$STORE_ADDR_FILE" ]; then
+  STORE_ADDR_BLOCK="
+【店舗ごとの住所・目印】
+$(cat "$STORE_ADDR_FILE")
+"
+else
+  STORE_ADDR_BLOCK=""
+fi
+if [ -n "$REBILL_RULES" ]; then
+  REBILL_BLOCK="
+【手順2の例外：届け先と仕入れの計上先が違う仕入先】
+次の仕入先は、納品書の届け先に店舗名が書かれていても、仕入れとして計上する店舗が別になる。
+届け先の記載よりこちらのルールを優先し、矢印の右側の店舗を使うこと。
+${REBILL_RULES}
+"
+else
+  REBILL_BLOCK=""
+fi
+NO_AUTO_STORE=$(grep '^!' "$SUPPLIER_MAP_FILE" | sed 's/^!//' | paste -sd '、' -)
+if [ -n "$NO_AUTO_STORE" ]; then
+  NO_AUTO_STORE_BLOCK="
+【手順2の例外：店舗を自動判定しない仕入先】
+次の仕入先は複数の店舗に納品があるため、届け先の店舗が具体的に明記されていない限り、
+宛名が会社名だけ（『燕』『麺屋燕』『TUBAMEカンパニー』等）でも本店とみなしてはいけない。必ず『不明』にすること。
+対象：${NO_AUTO_STORE}
+"
+else
+  NO_AUTO_STORE_BLOCK=""
+fi
+
+# 2026-09-12追加：仕入先名の表記ゆれ（同じ会社が「株式会社マルフク」「マルフク」など
+# 複数の名前で記録され、フォルダが分かれて重複判定の原因になっていた）を止めるため、
+# Obsidianの名寄せ表を毎回読み込んでAIに渡す。
+# 表を1つの正本にしてあるので、ユーザーがObsidianでこの.mdを編集すれば翌日から反映される。
+SUPPLIER_NAME_DOC="$HOME/Claude/Obsidian/kyosuke-brain/AI/reference/仕入先の正式名称_対応表.md"
+if [ -f "$SUPPLIER_NAME_DOC" ]; then
+  SUPPLIER_NAMES_TEXT=$(python3 -c "
+import re,sys
+doc=open(sys.argv[1],encoding='utf-8').read()
+out=[]
+for name,al in re.findall(r'^\\|\\s*([^|\\s][^|]*?)\\s*\\|\\s*([^|]*?)\\s*\\|\\s*\$',doc,re.M):
+    if name=='正式名称' or set(name)<=set('-― '):
+        continue
+    al=al.strip()
+    if al and al!='－':
+        out.append('・'+name+'（納品書に「'+al+'」と書かれていても '+name+' にする）')
+    else:
+        out.append('・'+name)
+print(chr(10).join(out))
+" "$SUPPLIER_NAME_DOC")
+else
+  SUPPLIER_NAMES_TEXT=""
+  echo "警告: 仕入先の名寄せ表が見つかりません（$SUPPLIER_NAME_DOC）。仕入先名の統一なしで実行します: $(date)" >> "$LOG_DIR/last_run_invoice_sort.log"
+fi
+
+if [ -n "$SUPPLIER_NAMES_TEXT" ]; then
+  SUPPLIER_NAMES_BLOCK="
+【最重要：仕入先名は必ず下の正式名称リストに揃える】
+読み取った社名がリストのどれかに該当する場合は、納品書上の表記（株式会社・有限会社の有無、旧字体、読み違えやすい字）がどうであっても、必ずリストの正式名称をそのまま使うこと。
+${SUPPLIER_NAMES_TEXT}
+リストのどれにも当てはまらない新しい仕入先だった場合は、読み取れたままの社名を使い、最後の報告に『リストに無い仕入先：<社名>』と明記すること。似ているだけの名前に勝手に寄せてはいけない。
+"
+else
+  SUPPLIER_NAMES_BLOCK=""
+fi
 STORE_LIST_TEXT="本店、KADODE店、空港店、静岡紺屋町店、セントラル、冷凍事業部、製麺事業部"
 
 PROMPT="【実行環境について】
@@ -81,18 +183,31 @@ ${FILE_LIST}
 
 【手順1：仕入先の判定】
 画像を読み、発行元・ロゴ・書式から仕入先名を判定する。
-${MIHON_DIR}/<仕入先名>/ に見本画像が置かれていることがある。置かれていれば、その書式（ロゴ・レイアウト）と見比べて判定の参考にしてよい。フォルダが空、または見本が無い場合は無視してよい。
-見本フォルダと一致した場合は、表記ゆれを避けるため必ずその見本フォルダ名（${MIHON_DIR}/直下のフォルダ名）をそのまま仕入先名として使うこと（例：見本フォルダが『木村商事』なら『木村商事株式会社』のように書かず『木村商事』を使う）。
+${MIHON_DIR}/<仕入先名>/<店舗名>/ に見本画像（過去に店舗が確定した納品書の手本）が置かれていることがある。
+置かれていれば、その書式（ロゴ・レイアウト・得意先コードの位置と桁数）と見比べて、仕入先の判定に使ってよい。
+さらに手順2の店舗判定でも、見本と同じ得意先コード・届け先住所が写っていれば、その見本のフォルダ名（店舗）を根拠として使ってよい（信頼度：高）。
+見本が無い、またはフォルダが空の場合は無視してよい。
 仕入先が全く読み取れない場合は『不明』として次の手順に進んでよい。
+${SUPPLIER_NAMES_BLOCK}
 
 【手順2：店舗の判定】
 次の優先順位で判定する。
-1. 画像内に届け先として対象店舗7つのうちどれか一つの店舗名・住所が具体的に明記されていれば、それを読んで店舗を決める（信頼度：高）
-2. 届け先の記載が『燕』『麺屋燕』『TUBAMEカンパニー』『株式会社TUBAMEカンパニー』のように会社全体を指すだけで、
-   店舗が特定できない場合は、本店とみなす（信頼度：低）
-3. 上記1・2のどちらでもない場合、以下の仕入先→店舗の対応関係に一致すれば、それで店舗を決める（信頼度：低）
+上から順に見ていき、当てはまったところで決める。前の番号で決まらなかったときだけ次へ進むこと。
+
+1. 届け先として具体的な店舗名が書いてある（例：燕セントラルキッチン、麺屋燕 本店、富士山静岡空港店、紺屋町店）
+   → その店舗にする（信頼度：高）
+2. 届け先の住所や得意先コードが、下の【店舗ごとの住所・目印】または見本フォルダの写真と一致する
+   → その店舗にする（信頼度：高）
+3. 下の仕入先→店舗の対応関係に、その仕入先が載っている
+   → その店舗にする（信頼度：低）
    ${SUPPLIER_MAP_RULES}
-4. 上記のいずれでも決められない場合は『不明』とする
+4. 届け先の記載が『燕』『麺屋燕』『TUBAMEカンパニー』のように会社全体を指すだけで、
+   ここまでで決まらなかった場合 → 本店とみなす（信頼度：低）
+5. 上記のいずれでも決められない場合は『不明』とする
+
+※2026-09-12に順番を変更。以前は「会社名だけなら本店」が対応表より先にあったため、
+　伝票に店舗名を書かない仕入先（クリチク等）が対応表に載っていても本店に入ってしまっていた。
+${NO_AUTO_STORE_BLOCK}${REBILL_BLOCK}${STORE_ADDR_BLOCK}
 
 対象店舗（7つ）：${STORE_LIST_TEXT}
 店舗名の表記ゆれ（『空港店』『静岡空港店』など）は上記7つのいずれかに正規化すること。
@@ -111,7 +226,7 @@ ${MIHON_DIR}/<仕入先名>/ に見本画像が置かれていることがある
 
 【重要】
 店舗が確信を持てない場合は、無理に決めず『不明』に入れること。
-最後に、何をどこに仕分けたか（元ファイル名→店舗→仕入先→年月→信頼度→保存ファイル名）を簡潔に一覧で報告してください。"
+最後に、何をどこに仕分けたか（元ファイル名→店舗→仕入先→年月→信頼度→保存ファイル名）を簡潔に一覧で報告してください。正式名称リストに無い仕入先があった場合は、一覧とは別に『リストに無い仕入先』としてまとめて書いてください。"
 
 # 何らかの理由でclaudeの呼び出しが極端に長引いた場合に備え、60分で強制終了する保険をかける
 TIMEOUT_SECONDS=3600
@@ -134,12 +249,32 @@ CLAUDE_EXIT=$?
 kill "$WATCHER_PID" 2>/dev/null
 wait "$WATCHER_PID" 2>/dev/null
 
-if [ "$CLAUDE_EXIT" -eq 0 ]; then
-  # 正常終了した分だけ「処理済み」として記録する（移動済みで受信箱には既に無いはずだが、
-  # 途中失敗時に同じファイルを重複して判定し直さないための保険）
-  printf '%s\n' "${TARGET_FILES[@]}" >> "$PROCESSED_FILE"
-else
-  echo "警告: claude呼び出しが異常終了（exit ${CLAUDE_EXIT}、タイムアウトの可能性）のため、今回の対象ファイルは処理済みにせず次回また対象にします ($(date))" >> "$LOG_FILE"
+# 2026-09-12変更：以前は「claudeが正常終了したか」で処理済みを記録していたが、
+# OneDrive障害で1枚も移動できていないのに正常終了した場合（2026-08-31に発生、72枚が
+# 永久に仕分けされない状態になった）まで処理済みにしてしまっていた。
+# 判断の根拠を「実際に受信箱から消えたか」だけに変える。受信箱に残っている写真は
+# 処理済みにせず、次回また自動で対象になる。
+MOVED_FILES=()
+STAYED_FILES=()
+for f in "${TARGET_FILES[@]}"; do
+  if [ -e "$f" ]; then
+    STAYED_FILES+=("$f")
+  else
+    MOVED_FILES+=("$f")
+  fi
+done
+
+if [ ${#MOVED_FILES[@]} -gt 0 ]; then
+  printf '%s\n' "${MOVED_FILES[@]}" >> "$PROCESSED_FILE"
+fi
+
+echo "実績: 仕分け済み ${#MOVED_FILES[@]}枚 / 受信箱に残った ${#STAYED_FILES[@]}枚（残った分は処理済みにせず次回また対象にします） ($(date))" >> "$LOG_FILE"
+if [ ${#STAYED_FILES[@]} -gt 0 ]; then
+  printf '  受信箱に残った: %s\n' "${STAYED_FILES[@]}" >> "$LOG_FILE"
+fi
+
+if [ "$CLAUDE_EXIT" -ne 0 ]; then
+  echo "警告: claude呼び出しが異常終了（exit ${CLAUDE_EXIT}、タイムアウトの可能性） ($(date))" >> "$LOG_FILE"
 fi
 
 # ログイン切れ等で失敗していたら、Claudeを介さず直接Slackへ警告する

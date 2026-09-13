@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.invoice.review</string>
+
+  <!-- 納品書の確認画面。ふだんはmacOSがポート8765だけ持っていて、
+       誰かがアクセスした瞬間にこのプログラムを起動する（ソケット起動）。
+       使っていない間はプログラムが存在しないのでメモリを使わない。
+       15分アクセスが無ければプログラム側で自動終了する。 -->
+  <!-- /usr/bin/python3 を直接指定すると、macOSのプライバシー保護でOneDriveの写真が
+       読めない（Operation not permitted）。夜間バッチと同じく /bin/zsh 経由で起動し、
+       すでに許可が与えられている経路に合わせる。 -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>exec /usr/bin/python3 /Users/haradakyosuke/Claude/invoice-scanner/automation/review_server.py</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>LAUNCH_SOCKET_NAME</key>
+    <string>Listener</string>
+  </dict>
+
+  <key>Sockets</key>
+  <dict>
+    <key>Listener</key>
+    <dict>
+      <key>SockServiceName</key>
+      <string>8766</string>
+      <key>SockType</key>
+      <string>stream</string>
+      <key>SockFamily</key>
+      <string>IPv4</string>
+    </dict>
+  </dict>
+
+  <!-- 起動時に勝手に動かさない。アクセスがあったときだけ動かす -->
+  <key>RunAtLoad</key>
+  <false/>
+  <key>KeepAlive</key>
+  <false/>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/haradakyosuke/Claude/invoice-scanner/automation</string>
+  <key>StandardOutPath</key>
+  <string>/Users/haradakyosuke/Claude/invoice-scanner/automation/logs/review_server.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/haradakyosuke/Claude/invoice-scanner/automation/logs/review_server.err.log</string>
+</dict>
+</plist>
