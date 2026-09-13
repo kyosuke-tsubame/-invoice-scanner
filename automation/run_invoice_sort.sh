@@ -26,15 +26,38 @@ touch "$PROCESSED_FILE"
 # AIを介さず単純なファイル移動のみなので、この処理自体がフリーズすることはない。
 MIHON_INBOX_DIR="$ONEDRIVE_ROOT/納品書写真/_見本投入"
 mkdir -p "$MIHON_INBOX_DIR"
-find "$MIHON_INBOX_DIR" -mindepth 2 -maxdepth 2 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.heic' \) -print0 2>/dev/null |
-while IFS= read -r -d '' f; do
+# 2026-09-14変更：OneDriveの「クラウドのみ（未ダウンロード）」状態の写真は、夜間はダウンロードが間に合わず
+# mvが「Resource deadlock avoided」で失敗し、9/12に27枚すべてが移らず残っていた。
+# 読み取り側（run_invoice_ocr.sh）と同じく、先に読み込んで実体化させてから移し、
+# 待っても読めない写真は今回は移さず（元の場所に残るので）翌日また対象にする。
+MIHON_FILES=("${(@0)$(find "$MIHON_INBOX_DIR" -mindepth 2 -maxdepth 2 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.heic' \) -print0 2>/dev/null)}")
+MIHON_FILES=(${MIHON_FILES:#})
+MIHON_NOT_READY=("${MIHON_FILES[@]}")
+for wait_sec in 0 30 60; do
+  [ ${#MIHON_NOT_READY[@]} -eq 0 ] && break
+  [ "$wait_sec" -gt 0 ] && sleep "$wait_sec"
+  STILL=()
+  for f in "${MIHON_NOT_READY[@]}"; do
+    cat "$f" > /dev/null 2>&1 || STILL+=("$f")
+  done
+  MIHON_NOT_READY=("${STILL[@]}")
+done
+for f in "${MIHON_FILES[@]}"; do
+  if (( ${MIHON_NOT_READY[(Ie)$f]} )); then
+    echo "見本の移動を見送り（OneDriveから取得できず、翌日また試す）: $f ($(date))" >> "$LOG_DIR/last_run_invoice_sort.log"
+    continue
+  fi
   supplier=$(basename "$(dirname "$f")")
   dest_dir="$PROJECT_DIR/見本/$supplier"
   mkdir -p "$dest_dir"
   dest="$dest_dir/$(basename "$f")"
   # 同名ファイルが既にあれば上書きせずタイムスタンプを付けて退避
   [ -e "$dest" ] && dest="$dest_dir/$(date +%Y%m%d%H%M%S)_$(basename "$f")"
-  mv "$f" "$dest" && echo "見本を移動: $f -> $dest ($(date))" >> "$LOG_DIR/last_run_invoice_sort.log"
+  if mv "$f" "$dest" 2>> "$LOG_DIR/last_run_invoice_sort.log"; then
+    echo "見本を移動: $f -> $dest ($(date))" >> "$LOG_DIR/last_run_invoice_sort.log"
+  else
+    echo "見本の移動に失敗（翌日また試す）: $f ($(date))" >> "$LOG_DIR/last_run_invoice_sort.log"
+  fi
 done
 
 # 受信箱直下の新着画像のうち、まだ処理済みリストに載っていないものだけを対象にする
