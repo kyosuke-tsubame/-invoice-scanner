@@ -79,17 +79,11 @@ rm -f "$ALL_IMAGES_FILE" "$UNPROCESSED_FILE"
 # これが原因で、中身に問題がないのに「要確認」へ回された写真が24枚溜まっていた。
 # ここで先に読み込んで実体化させ、待っても読めない写真は今回の対象から外す
 # （状態ファイルに記録しないので、翌日また自動で対象になる）。
+# 2026-09-15変更：cat で読むだけでは、自動起動の処理はmacOSの設定でダウンロードが許されず
+# 待っても読めない（見本写真の移動で確認）。ダウンロードを許可して読む部品（materialize.py）を使う。
 if [ ${#TARGET_FILES[@]} -gt 0 ]; then
-  NOT_READY=("${TARGET_FILES[@]}")
-  for wait_sec in 0 30 60; do
-    [ ${#NOT_READY[@]} -eq 0 ] && break
-    [ "$wait_sec" -gt 0 ] && sleep "$wait_sec"
-    STILL=()
-    for f in "${NOT_READY[@]}"; do
-      cat "$f" > /dev/null 2>&1 || STILL+=("$f")
-    done
-    NOT_READY=("${STILL[@]}")
-  done
+  NOT_READY=("${(@f)$(printf '%s\n' "${TARGET_FILES[@]}" | python3 "$PROJECT_DIR/materialize.py")}")
+  NOT_READY=(${NOT_READY:#})
 
   if [ ${#NOT_READY[@]} -gt 0 ]; then
     READY_FILES=()

@@ -32,16 +32,13 @@ mkdir -p "$MIHON_INBOX_DIR"
 # 待っても読めない写真は今回は移さず（元の場所に残るので）翌日また対象にする。
 MIHON_FILES=("${(@0)$(find "$MIHON_INBOX_DIR" -mindepth 2 -maxdepth 2 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.heic' \) -print0 2>/dev/null)}")
 MIHON_FILES=(${MIHON_FILES:#})
-MIHON_NOT_READY=("${MIHON_FILES[@]}")
-for wait_sec in 0 30 60; do
-  [ ${#MIHON_NOT_READY[@]} -eq 0 ] && break
-  [ "$wait_sec" -gt 0 ] && sleep "$wait_sec"
-  STILL=()
-  for f in "${MIHON_NOT_READY[@]}"; do
-    cat "$f" > /dev/null 2>&1 || STILL+=("$f")
-  done
-  MIHON_NOT_READY=("${STILL[@]}")
-done
+# 2026-09-15変更：待つだけでは9/14夜も27枚すべて読めなかった。自動起動の処理はmacOSの設定で
+# 「クラウドにしか無いファイルはダウンロードしない」扱いのため。ダウンロードを許可して読む部品を使う。
+MIHON_NOT_READY=()
+if [ ${#MIHON_FILES[@]} -gt 0 ]; then
+  MIHON_NOT_READY=("${(@f)$(printf '%s\n' "${MIHON_FILES[@]}" | python3 "$PROJECT_DIR/materialize.py")}")
+  MIHON_NOT_READY=(${MIHON_NOT_READY:#})
+fi
 for f in "${MIHON_FILES[@]}"; do
   if (( ${MIHON_NOT_READY[(Ie)$f]} )); then
     echo "見本の移動を見送り（OneDriveから取得できず、翌日また試す）: $f ($(date))" >> "$LOG_DIR/last_run_invoice_sort.log"
