@@ -272,14 +272,21 @@ function showSignedIn() {
 
 async function getAccessToken() {
   const request = { scopes: GRAPH_SCOPES, account };
-  try {
-    const result = await msalInstance.acquireTokenSilent(request);
-    return result.accessToken;
-  } catch (e) {
-    // 別窓（ポップアップ）方式はスマホでブロックされやすいため、
-    // 画面遷移（リダイレクト）でサインインし直す。遷移するのでここには戻ってこない。
-    await msalInstance.acquireTokenRedirect(request);
-    return null;
+  for (let n = 1; n <= 2; n++) {
+    try {
+      const result = await msalInstance.acquireTokenSilent(request);
+      return result.accessToken;
+    } catch (e) {
+      // 本当にサインインし直しが必要なときだけ、画面遷移（リダイレクト）でサインインし直す。
+      // 別窓（ポップアップ）方式はスマホでブロックされやすいため使わない。遷移するのでここには戻ってこない。
+      if (e instanceof msal.InteractionRequiredAuthError) {
+        await msalInstance.acquireTokenRedirect(request);
+        return null;
+      }
+      // 通信の一時的な失敗なら、少し待って1回だけやり直す（立ち上げ直後の1回目の失敗対策）
+      if (n === 2) throw e;
+      await sleep(1000);
+    }
   }
 }
 
@@ -352,10 +359,32 @@ function generateUniqueFilename(originalName) {
   return `${ts}_${rand}_${base}${ext}`;
 }
 
+// ── 通信のやり直し ────────────────────────
+// iPhoneでは、ページを開き直した直後の1回目の通信が「通信が切れました」で失敗することがある
+// （裏に置いていた間に切れた古い通信の道を使い回すため）。2回目以降は成功するので、
+// 通信そのものの失敗と、サーバー側の一時的な不調（429・5xx）だけ、少し待って最大3回までやり直す。
+// 2026-09-25追加：「立ち上げの1回目がだいたい失敗する」という報告への対応。
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function fetchWithRetry(url, options, tries = 3) {
+  let lastError;
+  for (let n = 1; n <= tries; n++) {
+    try {
+      const res = await fetch(url, options);
+      if (res.status !== 429 && res.status < 500) return res;
+      lastError = new Error(`サーバー応答 ${res.status}`);
+    } catch (e) {
+      lastError = e; // 通信そのものの失敗（Load failed など）
+    }
+    if (n < tries) await sleep(800 * n);
+  }
+  throw lastError;
+}
+
 // ── OneDriveへ送信 ────────────────────────
 async function uploadFileToOneDrive(file, filename, accessToken) {
   const createUrl = `https://graph.microsoft.com/v1.0/me/drive/items/${FOLDER_ITEM_ID}:/${encodeURIComponent(filename)}:/createUploadSession`;
-  const sessionRes = await fetch(createUrl, {
+  const sessionRes = await fetchWithRetry(createUrl, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -363,7 +392,7 @@ async function uploadFileToOneDrive(file, filename, accessToken) {
     },
     body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'rename' } })
   });
-  if (!sessionRes.ok) throw new Error('送信の準備に失敗しました');
+  if (!sessionRes.ok) throw new Error(`送信の準備に失敗しました（${sessionRes.status}）`);
   const session = await sessionRes.json();
   const uploadUrl = session.uploadUrl;
 
@@ -374,7 +403,7 @@ async function uploadFileToOneDrive(file, filename, accessToken) {
   while (start < total) {
     const end = Math.min(start + chunkSize, total);
     const chunk = file.slice(start, end);
-    const res = await fetch(uploadUrl, {
+    const res = await fetchWithRetry(uploadUrl, {
       method: 'PUT',
       headers: {
         'Content-Length': String(end - start),
@@ -383,7 +412,7 @@ async function uploadFileToOneDrive(file, filename, accessToken) {
       body: chunk
     });
     if (!res.ok && res.status !== 202) {
-      throw new Error('写真の送信に失敗しました');
+      throw new Error(`写真の送信に失敗しました（${res.status}）`);
     }
     start = end;
   }
@@ -400,7 +429,7 @@ async function sendAll() {
     accessToken = await getAccessToken();
   } catch (e) {
     document.getElementById('errorArea').innerHTML =
-      `<div class="error-row">⚠ サインインの確認に失敗しました。電波の良い場所でもう一度お試しください。</div>`;
+      `<div class="error-row">⚠ サインインの確認に失敗しました。電波の良い場所でもう一度お試しください。${reasonText(e)}</div>`;
     btn.disabled = false;
     return;
   }
@@ -412,6 +441,7 @@ async function sendAll() {
   let done = 0;
   const toSend = files.map((f, i) => i).filter(i => fileStatus[i] !== 'done');
   let hasError = false;
+  let lastError = null;
 
   for (const i of toSend) {
     fileStatus[i] = 'loading';
@@ -423,6 +453,7 @@ async function sendAll() {
     } catch (e) {
       fileStatus[i] = 'error';
       hasError = true;
+      lastError = e;
     }
     done++;
     const pct = Math.round((done / toSend.length) * 100);
@@ -435,7 +466,7 @@ async function sendAll() {
 
   if (hasError) {
     document.getElementById('errorArea').innerHTML =
-      `<div class="error-row">⚠ 一部の写真の送信に失敗しました。電波の良い場所でもう一度お試しください（成功した写真はそのまま残ります）。</div>`;
+      `<div class="error-row">⚠ 一部の写真の送信に失敗しました。電波の良い場所でもう一度お試しください（成功した写真はそのまま残ります）。${reasonText(lastError)}</div>`;
   } else {
     document.getElementById('doneArea').innerHTML = `
       <div class="done-box">
@@ -448,6 +479,12 @@ async function sendAll() {
     document.getElementById('progressWrap').style.display = 'none';
     updateActions();
   }
+}
+
+// 失敗の理由を小さく添える（続くときに原因を突き止めるため）
+function reasonText(e) {
+  if (!e) return '';
+  return `<div style="font-size:11px;opacity:.75;margin-top:4px">理由：${esc(e.errorCode || e.message || String(e))}</div>`;
 }
 
 // ── ドラッグ&ドロップ ─────────────────────
