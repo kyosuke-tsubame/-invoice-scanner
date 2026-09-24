@@ -26,6 +26,10 @@ if [ ! -f "$STATE_FILE" ]; then
   echo "{}" > "$STATE_FILE"
 fi
 
+# 経理アプリの「送る」で本部が送った写真を、先に受信箱へ入れる（2026-09-25追加）。
+# 失敗しても夜の処理は止めない（入れられなかった写真は次の晩にやり直す）
+python3 "$PROJECT_DIR/pull_app_uploads.py" >> "$LOG_DIR/pull_app_uploads.log" 2>&1 || true
+
 # 受信箱の新着写真を店舗フォルダへ仕分けてから読み取りに進む
 "$PROJECT_DIR/run_invoice_sort.sh"
 
