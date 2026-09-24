@@ -389,6 +389,11 @@ if lines:
 ")
 "$HOME/Claude/scripts/notify_backlog.sh" "C0BRBFZ2N6R" "$BACKLOG_MSG"
 
+# 経理アプリ（keiri-app）の「納品書仕分け」へ、まだ送っていない分を写真つきで送る（2026-09-24追加）。
+# Excel台帳への記帳は上でこれまでどおり行っている（しばらく並行）。失敗しても夜の処理は止めない（Slackで知らせる）
+echo "--- 経理アプリへ送信 ---" >> "$LOG_FILE"
+python3 "$PROJECT_DIR/push_scans_to_keiri.py" >> "$LOG_FILE" 2>&1 || echo "経理アプリへの送信でエラー（ログ参照）" >> "$LOG_FILE"
+
 echo "done: $(date)" >> "$LOG_DIR/last_run_invoice_ocr.log"
 
 # 古いログを30日で自動整理
