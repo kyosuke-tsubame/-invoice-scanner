@@ -101,6 +101,7 @@ LOGIN_PAGE = """<!doctype html><html lang="ja"><head><meta charset="utf-8">
  .err{color:#b3261e;font-size:14px;margin-top:12px;min-height:1.4em}
 </style></head><body>
 <form method="POST" action="/login">
+  <input type="hidden" name="next" value="__NEXT__">
   <h1>暗証番号を入れてください</h1>
   <input name="pin" type="tel" inputmode="numeric" maxlength="4" autofocus autocomplete="off">
   <button type="submit">開く</button>
@@ -278,6 +279,9 @@ fetch('/api/items').then(r=>r.json()).then(d=>{items=d.items;
 </script></body></html>"""
 
 
+PAGES = ("/", "/kensa")   # 暗証番号の入力画面を出してよいページ
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -310,18 +314,28 @@ class Handler(BaseHTTPRequestHandler):
                 return True
         return False
 
-    def _login_page(self, err=""):
-        self._send(200, LOGIN_PAGE.replace("__ERR__", err), "text/html; charset=utf-8")
+    def _login_page(self, err="", nxt="/"):
+        # ログイン後に元のページ（検査ページなど）へ戻れるよう、行き先を持たせる
+        nxt = nxt if nxt in PAGES else "/"
+        html = LOGIN_PAGE.replace("__ERR__", err).replace("__NEXT__", nxt)
+        self._send(200, html, "text/html; charset=utf-8")
 
     def do_GET(self):
         u = urlparse(self.path)
         if not self._authed():
-            if u.path in ("/", "/login"):
-                return self._login_page()
+            if u.path in PAGES or u.path == "/login":
+                return self._login_page(nxt=u.path)
             return self._send(401, {"error": "暗証番号を入れてください"})
         if u.path == "/":
             html = PAGE.replace("__STORES__", json.dumps(V.STORES, ensure_ascii=False))
             return self._send(200, html, "text/html; charset=utf-8")
+        if u.path == "/kensa":
+            html = KENSA_PAGE.replace("__STORES__", json.dumps(V.STORES, ensure_ascii=False))
+            return self._send(200, html, "text/html; charset=utf-8")
+        if u.path == "/api/kensa":
+            k = load_kensa()
+            return self._send(200, {"items": k["items"], "summary": kensa_summary(k),
+                                    "suppliers": sorted(V.load_official_names())})
         if u.path == "/api/items":
             names = sorted(V.load_official_names())
             return self._send(200, {"items": items_payload(), "suppliers": names})
@@ -343,17 +357,20 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if urlparse(self.path).path == "/login":
             n = int(self.headers.get("Content-Length", 0))
-            pin = parse_qs(self.rfile.read(n).decode()).get("pin", [""])[0].strip()
+            form = parse_qs(self.rfile.read(n).decode())
+            pin = form.get("pin", [""])[0].strip()
+            nxt = form.get("next", ["/"])[0]
+            nxt = nxt if nxt in PAGES else "/"
             now = time.time()
             if now < FAILED["until"]:
                 wait = int(FAILED["until"] - now)
-                return self._login_page(f"何度も間違えたため、あと{wait}秒お待ちください")
+                return self._login_page(f"何度も間違えたため、あと{wait}秒お待ちください", nxt)
             if secrets.compare_digest(pin, load_pin()):
                 FAILED.update(count=0, until=0.0)
                 token = secrets.token_urlsafe(32)
                 add_session(token)
                 self.send_response(303)
-                self.send_header("Location", "/")
+                self.send_header("Location", nxt)
                 self.send_header(
                     "Set-Cookie",
                     f"nouhin={token}; Path=/; HttpOnly; SameSite=Lax; "
@@ -363,16 +380,17 @@ class Handler(BaseHTTPRequestHandler):
             FAILED["count"] += 1
             if FAILED["count"] >= 5:
                 FAILED.update(count=0, until=now + 60)
-                return self._login_page("何度も間違えたため、60秒お待ちください")
-            return self._login_page("番号が違います")
+                return self._login_page("何度も間違えたため、60秒お待ちください", nxt)
+            return self._login_page("番号が違います", nxt)
         if not self._authed():
             return self._send(401, {"error": "暗証番号を入れてください"})
-        if urlparse(self.path).path != "/api/save":
+        handler = {"/api/save": handle_save, "/api/kensa": handle_kensa}.get(urlparse(self.path).path)
+        if handler is None:
             return self._send(404, {"error": "not found"})
         n = int(self.headers.get("Content-Length", 0))
         req = json.loads(self.rfile.read(n) or b"{}")
         try:
-            return self._send(200, handle_save(req))
+            return self._send(200, handler(req))
         except Exception as e:
             return self._send(200, {"ok": False, "error": f"保存できませんでした: {e}"})
 
@@ -389,6 +407,7 @@ def handle_save(req):
         if not isinstance(v, dict):
             return {"ok": False, "error": "この写真の記録が見つかりません"}
         now = time.strftime("%Y-%m-%dT%H:%M:%S+09:00")
+        keep_ai_reading(v)
 
         if action == "skip":
             v.update({"status": "skipped", "resolvedAt": now,
@@ -475,6 +494,263 @@ def handle_save(req):
         return {"ok": True,
                 "message": f"記帳しました：{entry['store']} / {entry['supplier']} / "
                            f"{entry['date']} / {entry['total']:,}円{warn}{extra}"}
+
+
+def keep_ai_reading(v):
+    """人が直す前に、機械が最初に読んだ値を aiReading として残す（1回目だけ）。
+
+    2026-09-24追加。直すと元の値が上書きで消えてしまい、機械がどれだけ間違えていたかを
+    後から数えられなかった（スキャナー廃止の判断材料が取れなかった）ため。
+    """
+    if "aiReading" not in v:
+        v["aiReading"] = {k: v.get(k) for k in ("store", "supplier", "date", "total")}
+
+
+# ---- 抜き取り検査（2026-09-24追加）----
+# 自動で記帳されたもの（人が一度も見ていないもの）から決まった枚数を選び、
+# 写真と記帳内容を人が見比べて正解率を出す。納品書スキャナー（Gemini）を廃止してよいかの判断用。
+KENSA_FILE = BASE / "kensa_sample.json"
+KENSA_SIZE = 40
+KENSA_FIELDS = {"store": "店舗", "supplier": "仕入先", "date": "日付", "total": "金額"}
+
+
+def load_kensa():
+    if KENSA_FILE.is_file():
+        return json.loads(KENSA_FILE.read_text(encoding="utf-8"))
+    return build_kensa()
+
+
+def save_kensa(k):
+    tmp = KENSA_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(k, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(KENSA_FILE)
+
+
+def build_kensa():
+    """仕入先が偏らないよう、仕入先ごとに順番に1枚ずつ拾って KENSA_SIZE 枚選ぶ。"""
+    import random
+    state = load_state()
+    by_sup = {}
+    for p, v in state.items():
+        if (isinstance(v, dict) and v.get("status") == "auto_saved" and "resolvedAt" not in v
+                and isinstance(v.get("total"), int) and os.path.isfile(p)):
+            by_sup.setdefault(normalize_supplier(v.get("supplier") or ""), []).append(p)
+    rng = random.Random(20260924)
+    for lst in by_sup.values():
+        rng.shuffle(lst)
+    order = sorted(by_sup, key=lambda s: rng.random())
+    picked = []
+    while len(picked) < KENSA_SIZE and any(by_sup.values()):
+        for s in order:
+            if by_sup[s] and len(picked) < KENSA_SIZE:
+                picked.append(by_sup[s].pop())
+    rng.shuffle(picked)
+    k = {"createdAt": time.strftime("%Y-%m-%dT%H:%M:%S+09:00"),
+         "items": [{"path": p,
+                    "reading": {f: state[p].get(f) for f in KENSA_FIELDS},
+                    "verdict": None} for p in picked]}
+    save_kensa(k)
+    return k
+
+
+def kensa_summary(k):
+    done = [it for it in k["items"] if it["verdict"] in ("ok", "ng")]
+    wrong = {f: sum(1 for it in done if f in it.get("wrong", [])) for f in KENSA_FIELDS}
+    serious = sum(1 for it in done if {"store", "total"} & set(it.get("wrong", [])))
+    return {"total": len(k["items"]), "done": len(done),
+            "unknown": sum(1 for it in k["items"] if it["verdict"] == "unknown"),
+            "allOk": sum(1 for it in done if it["verdict"] == "ok"),
+            "wrong": {KENSA_FIELDS[f]: n for f, n in wrong.items()},
+            "serious": serious,
+            "wrongList": [{"name": Path(it["path"]).name, "reading": it["reading"],
+                           "correct": it.get("correct"), "wrong": [KENSA_FIELDS[f] for f in it["wrong"]]}
+                          for it in done if it["verdict"] == "ng"]}
+
+
+def handle_kensa(req):
+    """抜き取り検査の1枚ぶんの判定を記録する。違っていた項目は台帳と記録も正しい値に直す。"""
+    with SAVE_LOCK:
+        k = load_kensa()
+        it = next((x for x in k["items"] if x["path"] == req.get("path")), None)
+        if it is None:
+            return {"ok": False, "error": "検査の対象ではありません"}
+        now = time.strftime("%Y-%m-%dT%H:%M:%S+09:00")
+        if req.get("action") == "unknown":
+            it.update(verdict="unknown", at=now)
+            save_kensa(k)
+            return {"ok": True, "message": "判断できない、として数に入れません", "summary": kensa_summary(k)}
+
+        r = it["reading"]
+        c = {"store": (req.get("store") or "").strip(),
+             "supplier": normalize_supplier((req.get("supplier") or "").strip()),
+             "date": (req.get("date") or "").strip()}
+        try:
+            c["total"] = int(str(req.get("total")).replace(",", "").strip())
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "金額を数字で入れてください"}
+        # 仕入先の表記ゆれ（株式会社の有無など）は名寄せでそろうので間違いに数えない
+        def same(f):
+            if f != "supplier":
+                return r.get(f) == c[f]
+            a, b = normalize_supplier(r.get(f) or ""), c[f]
+            return bool(a and b) and (a in b or b in a)
+        wrong = [f for f in KENSA_FIELDS if not same(f)]
+        extra = ""
+        if wrong:
+            extra = fix_ledger(r, c, wrong)
+            state = load_state()
+            v = state.get(it["path"])
+            if isinstance(v, dict):
+                keep_ai_reading(v)
+                v.update({f: c[f] for f in wrong})
+                v["resolvedAt"] = now
+                v["resolvedNote"] = "抜き取り検査で人が直した"
+                save_state(state)
+        it.update(verdict="ng" if wrong else "ok", wrong=wrong, correct=c if wrong else None, at=now)
+        save_kensa(k)
+        msg = ("合っている、で記録しました" if not wrong else
+               "違っていた項目：" + "・".join(KENSA_FIELDS[f] for f in wrong) + extra)
+        return {"ok": True, "message": msg, "summary": kensa_summary(k)}
+
+
+def fix_ledger(r, c, wrong):
+    """台帳の該当1行を正しい値に書き換える。1行に決まらなければ書き換えずに知らせる。"""
+    import contextlib
+    match = {"date": r.get("date"), "store": r.get("store"), "total": r.get("total")}
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        L.cmd_edit({"match": match, "set": {f: c[f] for f in wrong}})
+    try:
+        res = json.loads(buf.getvalue())
+    except ValueError:
+        res = {"error": buf.getvalue()}
+    if "error" in res:
+        return "（台帳の行が1つに決まらなかったため、台帳は直していません。後でまとめて直します）"
+    return "（台帳も直しました）"
+
+
+KENSA_PAGE = """<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>抜き取り検査</title>
+<style>
+  :root{--bg:#f4f4f6;--card:#fff;--line:#d8d8de;--ink:#1c2340;--accent:#1c2340}
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.6 -apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;
+       background:var(--bg);color:var(--ink)}
+  header{background:var(--accent);color:#fff;padding:10px 18px;display:flex;gap:18px;align-items:center;
+         position:sticky;top:0;z-index:5}
+  header b{font-size:17px}
+  #prog{margin-left:auto;font-variant-numeric:tabular-nums}
+  main{display:grid;grid-template-columns:1fr 400px;gap:18px;padding:18px;align-items:start}
+  @media (max-width:900px){main{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+  #photo{width:100%;border-radius:6px;display:block;cursor:zoom-in;background:#eee}
+  .hint{font-size:13px;color:#666;margin:8px 0 0}
+  label{display:block;font-size:13px;font-weight:600;margin:14px 0 4px}
+  input,select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-size:15px;
+               background:#fff;color:var(--ink)}
+  input[type=number]{text-align:right}
+  .lead{font-size:14px;margin:0 0 4px}
+  .btns{display:grid;gap:8px;margin-top:18px}
+  button{padding:11px 14px;border-radius:8px;border:1px solid var(--line);background:#fff;
+         font-size:15px;font-weight:600;cursor:pointer;color:var(--ink)}
+  .primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  #msg{padding:10px 14px;border-radius:8px;margin:0 18px;display:none;font-size:14px}
+  .ok{background:#e8f5e9;border:1px solid #a5d6a7}
+  .ng{background:#fdecea;border:1px solid #f5aca6}
+  #result{padding:24px;max-width:720px;margin:0 auto;display:none}
+  #result h2{font-size:20px}
+  table{border-collapse:collapse;width:100%;background:#fff;margin:8px 0 18px}
+  td,th{border:1px solid var(--line);padding:6px 10px;text-align:left;font-size:14px}
+  .pass{font-size:18px;font-weight:700;padding:14px;border-radius:8px}
+  dialog{border:none;border-radius:10px;padding:0;max-width:96vw;max-height:96vh}
+  dialog img{display:block;max-width:96vw;max-height:92vh}
+  dialog::backdrop{background:rgba(0,0,0,.75)}
+  .nav{display:flex;gap:8px;margin-top:8px}
+  .nav button{flex:1}
+</style></head><body>
+<header><b>抜き取り検査</b><span id="prog"></span></header>
+<div id="msg"></div>
+<main id="app">
+  <div class="card">
+    <img id="photo" alt="納品書の写真">
+    <p class="hint">写真をクリックすると拡大します。</p>
+  </div>
+  <div class="card">
+    <p class="lead">写真と見比べてください。<b>違う項目だけ</b>正しい値に直して「確定」を押します。<br>
+    全部合っていれば、そのまま「確定」でOKです。</p>
+    <label>店舗</label><select id="store"></select>
+    <label>仕入先</label><input id="supplier" list="suppliers"><datalist id="suppliers"></datalist>
+    <label>日付</label><input id="date" type="date">
+    <label>金額（税抜）</label><input id="total" type="number" step="1">
+    <div class="btns">
+      <button class="primary" id="save">確定して次へ</button>
+      <button id="unknown">写真が読めない・判断できない</button>
+    </div>
+    <div class="nav"><button id="prev">← 前</button><button id="next">次 →</button></div>
+  </div>
+</main>
+<div id="result"></div>
+<dialog id="zoom"><img id="zoomimg"></dialog>
+<script>
+let items=[],i=0;
+const $=id=>document.getElementById(id);
+const STORES=__STORES__;
+function msg(t,cls){const m=$('msg');m.textContent=t;m.className=cls;m.style.display=t?'block':'none';
+  if(t)setTimeout(()=>{m.style.display='none'},4000);}
+function showResult(s){
+  $('app').style.display='none';const R=$('result');R.style.display='block';
+  const ok=s.serious<=1;
+  let h=`<h2>検査の結果（${s.done}枚を確認）</h2>
+  <div class="pass ${ok?'ok':'ng'}">${ok?'合格：金額・店舗の間違いは'+s.serious+'枚。スキャナーを廃止してよい目安を満たしました'
+    :'不合格：金額か店舗の間違いが'+s.serious+'枚（目安は1枚以下）。原因を直して再検査します'}</div>
+  <table><tr><th>項目</th><th>正しかった</th><th>間違い</th></tr>`;
+  for(const [k,n] of Object.entries(s.wrong))h+=`<tr><td>${k}</td><td>${s.done-n} / ${s.done}</td><td>${n}</td></tr>`;
+  h+=`</table><p>全部合っていた枚数：${s.allOk} / ${s.done}　（判断できないで外した枚数：${s.unknown}）</p>`;
+  if(s.wrongList.length){h+='<h3>間違っていたもの</h3><table><tr><th>写真</th><th>項目</th><th>記帳されていた値</th><th>正しい値</th></tr>';
+    for(const w of s.wrongList){const r=w.reading,c=w.correct;
+      h+=`<tr><td>${w.name}</td><td>${w.wrong.join('・')}</td><td>${r.store} / ${r.supplier} / ${r.date} / ${r.total}</td><td>${c.store} / ${c.supplier} / ${c.date} / ${c.total}</td></tr>`;}
+    h+='</table>';}
+  h+='<button onclick="location.reload()">もう一度見直す</button>';
+  R.innerHTML=h;
+}
+function render(){
+  const left=items.filter(x=>!x.verdict).length;
+  $('prog').textContent=`残り ${left} 枚 / 全 ${items.length} 枚`;
+  if(i>=items.length)i=0; if(i<0)i=items.length-1;
+  const it=items[i],r=it.reading;
+  $('photo').src='/photo?p='+encodeURIComponent(it.path);
+  $('store').innerHTML=STORES.map(s=>`<option ${s===r.store?'selected':''}>${s}</option>`).join('');
+  const c=it.correct||r;
+  $('store').value=c.store;$('supplier').value=c.supplier||'';$('date').value=c.date||'';$('total').value=c.total;
+}
+function nextUnjudged(){
+  for(let k=1;k<=items.length;k++){const j=(i+k)%items.length;if(!items[j].verdict){i=j;return true;}}
+  return false;
+}
+async function send(action){
+  const it=items[i];
+  const body={path:it.path,action,store:$('store').value,supplier:$('supplier').value,
+              date:$('date').value,total:$('total').value};
+  const r=await fetch('/api/kensa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d=await r.json();
+  if(!d.ok){msg(d.error,'ng');return;}
+  msg(d.message,'ok');
+  it.verdict=action==='unknown'?'unknown':'done';
+  if(!nextUnjudged())return showResult(d.summary);
+  render();
+}
+$('save').onclick=()=>send('judge');
+$('unknown').onclick=()=>send('unknown');
+$('next').onclick=()=>{i++;render();};
+$('prev').onclick=()=>{i--;render();};
+$('photo').onclick=()=>{$('zoomimg').src=$('photo').src;$('zoom').showModal();};
+$('zoom').onclick=()=>$('zoom').close();
+fetch('/api/kensa').then(r=>r.json()).then(d=>{items=d.items;
+  $('suppliers').innerHTML=d.suppliers.map(s=>`<option value="${s}">`).join('');
+  if(!items.some(x=>!x.verdict))return showResult(d.summary);
+  i=items.findIndex(x=>!x.verdict);render();});
+</script></body></html>"""
 
 
 def normalize_supplier(name):
