@@ -146,6 +146,14 @@ header h1 { color: #fff; font-size: 16px; font-weight: 600; }
 }
 .done-icon { font-size: 40px; margin-bottom: 10px; }
 .done-text { font-size: 14px; color: #1d9e75; font-weight: 600; }
+
+.store-row { margin-bottom: 14px; }
+.store-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.store-select {
+  width: 100%; padding: 12px; font-size: 15px; font-family: inherit;
+  border: 1.5px solid #1c2340; border-radius: 10px; background: #fff; color: #1a1a1a;
+}
+.store-note { font-size: 11px; color: #888; margin-top: 6px; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -169,10 +177,17 @@ header h1 { color: #fff; font-size: 16px; font-weight: 600; }
   <!-- アップロード（サインイン後に表示） -->
   <div class="card" id="uploadCard" style="display:none">
     <div class="account-label" id="accountLabel"></div>
-    <div class="card-title">納品書をアップロード</div>
+    <div class="card-title">納品書・レシートをアップロード</div>
+    <div class="store-row">
+      <label class="store-label" for="storeSelect">どの店の分ですか？</label>
+      <select class="store-select" id="storeSelect" onchange="saveStore(this.value)">
+        <option value="">選ばない（AIが写真から判断）</option>
+      </select>
+      <p class="store-note">一度選ぶと、このスマホでは次から自動でこの店になります。<br>レシートは店名が書いていないので、必ず店を選んでください。</p>
+    </div>
     <div class="drop-area" id="dropArea" onclick="document.getElementById('fileInput').click()">
       <div class="drop-icon">📷</div>
-      <p class="drop-text">納品書の写真をここにドロップ<br>またはタップして選択</p>
+      <p class="drop-text">納品書・レシートの写真をここにドロップ<br>またはタップして選択</p>
       <button class="btn btn-outline btn-sm" onclick="event.stopPropagation(); document.getElementById('fileInput').click()">
         写真を選択
       </button>
@@ -203,6 +218,9 @@ header h1 { color: #fff; font-size: 16px; font-weight: 600; }
 // ── 設定 ──────────────────────────────────
 const FOLDER_ITEM_ID = 'E017E7B2128EB245!sf8c49dc880e6429885bc31cfb295eeca'; // 受信箱フォルダ
 const GRAPH_SCOPES = ['Files.ReadWrite'];
+// 「納品書写真/」直下の店舗フォルダ名。夜の読み取り（automation/run_invoice_ocr.sh の STORES）と同じ名前にすること
+const STORES = ['本店', 'KADODE店', '空港店', '静岡紺屋町店', 'セントラル', '冷凍事業部', '製麺事業部'];
+const STORE_KEY = 'invoiceUploadStore';
 
 const msalConfig = {
   auth: {
@@ -288,6 +306,24 @@ async function getAccessToken() {
       await sleep(1000);
     }
   }
+}
+
+// ── 店の選択（このスマホに覚えておく） ──────
+function initStoreSelect() {
+  const sel = document.getElementById('storeSelect');
+  STORES.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s;
+    sel.appendChild(opt);
+  });
+  let saved = '';
+  try { saved = localStorage.getItem(STORE_KEY) || ''; } catch (e) {}
+  if (STORES.includes(saved)) sel.value = saved;
+}
+
+function saveStore(value) {
+  try { localStorage.setItem(STORE_KEY, value); } catch (e) {}
 }
 
 // ── ファイル操作 ──────────────────────────
@@ -382,8 +418,46 @@ async function fetchWithRetry(url, options, tries = 3) {
 }
 
 // ── OneDriveへ送信 ────────────────────────
-async function uploadFileToOneDrive(file, filename, accessToken) {
-  const createUrl = `https://graph.microsoft.com/v1.0/me/drive/items/${FOLDER_ITEM_ID}:/${encodeURIComponent(filename)}:/createUploadSession`;
+// 店を選んだときは受信箱と同じ階層（納品書写真/）の店舗フォルダへ直接入れる。
+// 受信箱を通らないので夜のAI仕分けを経ずにその店として読み取られる（レシートのように店名が無い写真のため）
+let photosRoot = null; // { driveId, id }：受信箱の親＝「納品書写真」フォルダ
+async function getPhotosRoot(accessToken) {
+  if (photosRoot) return photosRoot;
+  const res = await fetchWithRetry(`https://graph.microsoft.com/v1.0/me/drive/items/${FOLDER_ITEM_ID}?$select=parentReference`, {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  if (!res.ok) throw new Error('店のフォルダが見つかりません');
+  const ref = (await res.json()).parentReference;
+  if (!ref || !ref.driveId || !ref.id) throw new Error('店のフォルダが見つかりません');
+  photosRoot = { driveId: ref.driveId, id: ref.id };
+  return photosRoot;
+}
+
+async function uploadUrlFor(filename, store, accessToken) {
+  const name = encodeURIComponent(filename);
+  if (!store) {
+    return `https://graph.microsoft.com/v1.0/me/drive/items/${FOLDER_ITEM_ID}:/${name}:/createUploadSession`;
+  }
+  const root = await getPhotosRoot(accessToken);
+  return `https://graph.microsoft.com/v1.0/drives/${root.driveId}/items/${root.id}:/${encodeURIComponent(store)}/${name}:/createUploadSession`;
+}
+
+// 店のフォルダへ入れられなかったときは受信箱へ入れ直す（写真を失くさないため。店は夜のAIが判断する）。
+// 入れた先の店名を返す（受信箱なら空）
+async function uploadWithStore(file, filename, store, accessToken) {
+  if (store) {
+    try {
+      await uploadFileToOneDrive(file, await uploadUrlFor(filename, store, accessToken), accessToken);
+      return store;
+    } catch (e) {
+      console.warn('店のフォルダへの送信に失敗したため受信箱へ送ります', e);
+    }
+  }
+  await uploadFileToOneDrive(file, await uploadUrlFor(filename, '', accessToken), accessToken);
+  return '';
+}
+
+async function uploadFileToOneDrive(file, createUrl, accessToken) {
   const sessionRes = await fetchWithRetry(createUrl, {
     method: 'POST',
     headers: {
@@ -438,17 +512,19 @@ async function sendAll() {
     return;
   }
 
+  const store = document.getElementById('storeSelect').value;
   let done = 0;
   const toSend = files.map((f, i) => i).filter(i => fileStatus[i] !== 'done');
   let hasError = false;
   let lastError = null;
+  let toInbox = 0; // 店を選んだのに店のフォルダへ入れられず受信箱へ回した枚数
 
   for (const i of toSend) {
     fileStatus[i] = 'loading';
     renderPreviews();
     try {
       const filename = generateUniqueFilename(files[i].name);
-      await uploadFileToOneDrive(files[i], filename, accessToken);
+      if (await uploadWithStore(files[i], filename, store, accessToken) !== store) toInbox++;
       fileStatus[i] = 'done';
     } catch (e) {
       fileStatus[i] = 'error';
@@ -471,7 +547,8 @@ async function sendAll() {
     document.getElementById('doneArea').innerHTML = `
       <div class="done-box">
         <div class="done-icon">✅</div>
-        <div class="done-text">送信が完了しました！</div>
+        <div class="done-text">送信が完了しました！${store ? `（${esc(store)}）` : ''}</div>
+        ${store && toInbox ? `<p class="store-note">うち${toInbox}枚は店のフォルダに入れられなかったため、受信箱に送りました（店は夜にAIが判断します）</p>` : ''}
       </div>`;
     files = [];
     fileStatus = {};
@@ -497,6 +574,7 @@ dropArea.addEventListener('drop', e => {
   addFiles(e.dataTransfer.files);
 });
 
+initStoreSelect();
 initAuth();
 </script>
 </body>
