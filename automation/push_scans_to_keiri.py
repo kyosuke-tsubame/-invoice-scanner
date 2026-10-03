@@ -12,6 +12,8 @@ run_invoice_ocr.sh の最後に呼ぶ（Excel台帳への記帳はこれまで�
   skipped            → 記帳しない
   resolved_duplicate → 記帳しない（重複）
 送った写真は keiri_sent.txt に受信箱のファイル名で記録する（仕分けの記録・状態ファイルとは別）。
+品目（items・lineTaxType）も一緒に送る（2026-10-04〜）。1枚の写真に伝票が2枚以上あったとき（moreInvoices）は、
+2枚目以降を「<ファイル名>#2」のような別の納品書として同じ写真つきで送り、すべて要確認にする（経理アプリで1枚ずつ確認して登録）。
 送った後に Mac mini 側（8766番の画面・Slack返信）で直しても経理アプリには反映されない。直すのは経理アプリの画面で。
 
 手動テスト：
@@ -42,7 +44,7 @@ SENT_FILE = os.path.join(HERE, "keiri_sent.txt")
 ENV_FILE = os.path.join(HOME, "Claude", "keiri-app", ".env.local")
 API_BASE = os.environ.get("KEIRI_API_BASE", "https://keiri-app-one.vercel.app")
 NOTIFY = os.path.join(HOME, "Claude", "scripts", "notify_slack.sh")
-SLACK_CHANNEL = "C0BRBFZ2N6R"  # #納品書通知
+SLACK_CHANNEL = "C0C4QRP9FRA"  # #経理通知（2026-09-26に #納品書通知 から移動）
 
 
 def read_env():
@@ -110,9 +112,40 @@ def build_body(path, v, image):
         body["initialStatus"] = "discarded"
         if status == "resolved_duplicate":
             body["humanMemo"] = "重複（Mac mini側で処理済み）" + (f"／{body['humanMemo']}" if body["humanMemo"] else "")
+    # 品目（2026-10-04〜）。読めた分だけ。無ければ送らない
+    if isinstance(v.get("items"), list) and v.get("items"):
+        body["items"] = v.get("items")
+        body["lineTaxType"] = v.get("lineTaxType") or "unknown"
     if image is not None:
         body["image"] = {"contentType": "image/jpeg", "data": base64.b64encode(image).decode()}
     return body
+
+
+def extra_bodies(path, v, image):
+    """1枚の写真に写っていた2枚目以降の伝票を、別の納品書として送る形にする（すべて要確認）"""
+    more = [m for m in (v.get("moreInvoices") or []) if isinstance(m, dict)]
+    if not more:
+        return []
+    count = len(more) + 1
+    out = []
+    for n, m in enumerate(more, start=2):
+        w = {
+            "status": "held_for_review",
+            "store": v.get("store"),
+            "supplier": m.get("supplier") or v.get("supplier"),
+            "date": m.get("date") or "",
+            "total": m.get("total"),
+            "taxType": m.get("taxType") or "unknown",
+            "note": f"1枚の写真に伝票が{count}枚（{n}枚目）",
+            "heldNote": f"1枚の写真に伝票が{count}枚（{n}枚目）。写真のこの伝票の分だけを登録してください",
+            "processedAt": v.get("processedAt"),
+            "items": m.get("items") or [],
+            "lineTaxType": m.get("lineTaxType") or "unknown",
+        }
+        b = build_body(path, w, image)
+        b["sourceKey"] = f"{source_key(path)}#{n}"
+        out.append(b)
+    return out
 
 
 def api(path, auth, body):
@@ -170,10 +203,21 @@ def main():
             if image is None and os.path.exists(path):
                 failures.append(f"{os.path.basename(path)}：写真を読めなかった（次の晩にやり直す）")
                 continue
-            res = api("/api/invoice-scans", auth, build_body(path, v, image))
+            body = build_body(path, v, image)
+            if v.get("moreInvoices"):
+                # 1枚目も要確認にする（同じ写真に別の伝票が写っているので、人が見て分けて登録する）
+                count = len(v.get("moreInvoices")) + 1
+                body["holdReasons"] = list(body.get("holdReasons") or []) + [f"1枚の写真に伝票が{count}枚（1枚目）。写真のこの伝票の分だけを登録してください"]
+            res = api("/api/invoice-scans", auth, body)
             if "error" in res:
                 failures.append(f"{os.path.basename(path)}：{res.get('error')} {res.get('body', '')}")
                 continue
+            for extra in extra_bodies(path, v, image):
+                r2 = api("/api/invoice-scans", auth, extra)
+                if "error" in r2:
+                    failures.append(f"{extra['sourceKey']}：{r2.get('error')} {r2.get('body', '')}")
+                else:
+                    result["duplicate" if r2.get("duplicate") else r2.get("status", "?")] += 1
             key = "duplicate" if res.get("duplicate") else res.get("status", "?")
             result[key] += 1
             if image is None:

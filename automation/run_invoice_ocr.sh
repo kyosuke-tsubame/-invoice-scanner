@@ -205,13 +205,13 @@ ${FILE_LIST}"
   fi
 
   if [ "$BATCH_NUM" -eq 1 ]; then
-    STEP0_TEXT="まず、mcp__mail-secretary__list_slack_repliesをchannel=\"C0BRBFZ2N6R\"で呼び出し、前回のSlack報告以降に届いた返信を確認する。
+    STEP0_TEXT="まず、mcp__mail-secretary__list_slack_repliesをchannel=\"C0C4QRP9FRA\"で呼び出し、前回のSlack報告以降に届いた返信を確認する。
 返信が無ければ、この手順は何もせず手順1に進む。
 返信があれば1件ずつ内容を確認する（単なる相槌・お礼など対応不要なものは無視してよい）：
 - 「◯◯店の△△の写真、もう一度読んで」のような再確認の指示：該当する画像ファイルを${PHOTOS_ROOT}配下から探してReadで読み直し、内容に自信が持てればpython3 ${LEDGER_SCRIPT} addで記帳する（まだ記帳されていない＝held_for_reviewだった画像が対象）。状態ファイルの該当エントリのstatusも\"auto_saved\"に更新する。
-- 「8/15の空港店、金額は3,200円が正しい」のような、既に記帳済みの内容への修正指示：python3 ${LEDGER_SCRIPT} edit '{\"match\":{...},\"set\":{...}}' で直す。matchには返信文から読み取れる範囲の情報（date/store/supplierの組み合わせ）を指定する。結果のJSONにerrorが含まれていたら（該当0件・複数件など）、絶対に当て推量で決めず、notify_slack（channel引数は必ず\"C0BRBFZ2N6R\"）で候補を示して確認を求める。
+- 「8/15の空港店、金額は3,200円が正しい」のような、既に記帳済みの内容への修正指示：python3 ${LEDGER_SCRIPT} edit '{\"match\":{...},\"set\":{...}}' で直す。matchには返信文から読み取れる範囲の情報（date/store/supplierの組み合わせ）を指定する。結果のJSONにerrorが含まれていたら（該当0件・複数件など）、絶対に当て推量で決めず、notify_slack（channel引数は必ず\"C0C4QRP9FRA\"）で候補を示して確認を求める。
 - 上記のどちらにも当てはまらない、対応方法が分からない指示：無理に何かをせず、notify_slackで『この内容は自動では対応できないため、Excel台帳を直接確認・修正してください』のように伝える。
-返信に対して何かしら行動した場合、または対応できず確認を求めた場合は、その内容をnotify_slack（channel引数は必ず\"C0BRBFZ2N6R\"）で簡潔に報告する。単なる相槌で何もしなかった場合は通知しない。"
+返信に対して何かしら行動した場合、または対応できず確認を求めた場合は、その内容をnotify_slack（channel引数は必ず\"C0C4QRP9FRA\"）で簡潔に報告する。単なる相槌で何もしなかった場合は通知しない。"
   else
     STEP0_TEXT="このグループでは手順0は実行しません（1グループ目で対応済みのため）。そのまま手順1に進んでください。"
   fi
@@ -219,7 +219,7 @@ ${FILE_LIST}"
   if [ "$BATCH_NUM" -eq "$BATCH_COUNT" ]; then
     STEP5_TEXT="これが最終グループです。今回のバッチ実行全体（今回の起動時刻 ${RUN_STARTED_AT} 以降に処理した分すべて。前のグループで処理した分も含む）をまとめて対象に、1回だけSlack報告してください。
 不明フォルダ（${PHOTOS_ROOT}/不明）には現在${UNKNOWN_COUNT}件の画像があります。
-今回処理した画像が1件以上、または不明フォルダに1件以上あれば、mcp__mail-secretary__notify_slackで1通だけ報告する（channel引数には必ず \"C0BRBFZ2N6R\"＝#納品書通知 を指定すること）。
+今回処理した画像が1件以上、または不明フォルダに1件以上あれば、mcp__mail-secretary__notify_slackで1通だけ報告する（channel引数には必ず \"C0C4QRP9FRA\"＝#経理通知 を指定すること）。
 見出しは『【納品書OCR】』とする。
 自動記帳した分：店舗・日付・仕入先・金額を一覧で。
 要確認になった分：店舗・ファイル名・読み取れた範囲の内容（分かる範囲でよい）・保留理由を一覧で、『OneDriveの元写真を確認のうえ、Excel台帳（納品書写真と同じOneDrive内、「納品書集計/納品書集計.xlsx」）に直接1行追記してください』と添える。
@@ -249,9 +249,13 @@ ${STATE_FILE}
   \"total\": 0,
   \"taxType\": \"excluded\" | \"included\" | \"unknown\",
   \"note\": \"<保留にした理由。自動保存なら空欄>\",
-  \"processedAt\": \"<処理日時>\"
+  \"processedAt\": \"<処理日時>\",
+  \"items\": [<品目の各行。手順1参照。読めなければ空配列>],
+  \"lineTaxType\": \"excluded\" | \"included\" | \"unknown\",
+  \"moreInvoices\": [<1枚の写真に伝票が2枚以上あったときだけ、2枚目以降の伝票。手順2参照>]
 }
 このファイルはRead/Writeで読み書きすること。壊さないよう、更新時は全体を読み直してから書き戻すこと。
+状態ファイルに記録するときは、auto_saved・held_for_review のどちらでも items と lineTaxType を必ず一緒に入れること（翌朝、経理アプリへ品目として送られる）。
 
 【手順0：Slack返信への対応】
 ${STEP0_TEXT}
@@ -263,6 +267,11 @@ ${STEP1_INTRO}
 - supplier：仕入先の会社名（読めなければ空文字）\n${READING_MEMO_BLOCK}\n${SUPPLIER_NAMES_BLOCK}
 - total と taxType：税抜金額（税抜金額）が明記されていればそれをtotalとし、taxTypeを\"excluded\"とする。税込金額（税込金額）が明記されていればそれをtotalとし、taxTypeを\"included\"とする。\n  消費税欄に具体的な税額・税込金額の記載が無く、『軽減8%』『8%』『10%』のような税率表記だけ、または0円・空欄の場合は、記載されている金額（対象額・小計・合計など）をtotalとし、taxTypeを\"excluded\"として扱う（税抜金額として記帳する、という会社の運用ルール）。\n  上記のいずれにも当てはまらない場合（手書きで金額自体が判読できない等、金額そのものが読み取れない場合）のみtaxTypeを\"unknown\"とする。
 - store：画像が入っていたフォルダ名をそのまま使う
+- items：明細（品目）の各行（2026-10-04追加。経理アプリと原価アプリで仕入値の動きを見るため）。
+  {\"name\":品名（印字どおり）,\"spec\":規格・入数（\"1kg\" \"10食\" など。無ければ null）,\"qty\":数量,\"unit\":単位（kg・個・袋・ケースなど。無ければ null）,\"unitPrice\":単価,\"amount\":金額}
+  値引き・送料・消費税・保証金の行は入れない。読めない項目は null（推測しない）。明細が読めなければ空の配列。
+  品目は記帳の判断（手順2〜4）には使わない。品目が読めなくても、合計の記帳は今までどおり行う
+- lineTaxType：明細の金額が税抜なら \"excluded\"、税込なら \"included\"、判断できなければ \"unknown\"
 
 【手順2：自動保存か要確認かの判定】
 次のいずれかに該当する画像は\"held_for_review\"（要確認）とし、スプレッドシートには書き込まない：
@@ -271,6 +280,10 @@ ${STEP1_INTRO}
 - taxType が \"included\"（税込金額しか書かれておらず、税抜金額への変換を思い込みで決め打ちすると記帳ミスになるため）または \"unknown\"（金額自体が読み取れない場合）
 - 手順3で重複の疑いありと判定された
 - ファイル名が「要確認_」で始まる（届け先の記載が無く、仕入先からの推測だけで店舗フォルダを決めた印。内容の自信度に関わらず必ず要確認とし、noteに「店舗を仕入先からの推測のみで判定（届け先記載なし）」と記録する）
+- 1枚の写真に、日付や伝票番号の違う納品書が2枚以上写っている（2026-10-04追加）。合計して1枚にせず、
+  1枚目の伝票を date・supplier・total・taxType・items・lineTaxType に、2枚目以降を moreInvoices に
+  同じ形（{\"date\",\"supplier\",\"total\",\"taxType\",\"items\",\"lineTaxType\"}）で入れ、note に「1枚の写真に伝票がN枚」と記録する。
+  Excel台帳には書き込まない（経理アプリで伝票ごとに分けて確認・登録する）
 
 上記のどれにも該当しなければ、手順3の重複チェックに進む。
 
@@ -391,7 +404,7 @@ if unknown:
 if lines:
     print('【納品書OCR 滞留状況】\n' + '\n'.join(lines) + '\n\nOneDriveの「納品書写真」フォルダをご確認ください。')
 ")
-"$HOME/Claude/scripts/notify_backlog.sh" "C0BRBFZ2N6R" "$BACKLOG_MSG"
+"$HOME/Claude/scripts/notify_backlog.sh" "C0C4QRP9FRA" "$BACKLOG_MSG"
 
 # 経理アプリ（keiri-app）の「納品書仕分け」へ、まだ送っていない分を写真つきで送る（2026-09-24追加）。
 # Excel台帳への記帳は上でこれまでどおり行っている（しばらく並行）。失敗しても夜の処理は止めない（Slackで知らせる）
