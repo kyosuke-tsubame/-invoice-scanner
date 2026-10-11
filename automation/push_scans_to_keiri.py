@@ -99,6 +99,11 @@ def build_body(path, v, image):
         "humanMemo": v.get("humanMemo") or v.get("resolvedNote") or None,
         "processedAt": v.get("processedAt"),
         "holdReasons": [],
+        # 店舗をどう決めたか（経理アプリの確認画面に出す。後から「推測で決めた分」を見分けるため）
+        # 「要確認_」の目印は、届け先の記載が無く仕入先からの推測だけで店舗を決めたときに仕分けが付ける（move_sorted.py）
+        "sortBasis": "仕入先からの推測（届け先の記載なし）"
+        if os.path.basename(path).startswith("要確認_")
+        else "届け先・住所・得意先コードから判定",
     }
     if status == "auto_saved" and body["taxType"] != "excluded":
         # Mac mini側で記帳済み（Excel台帳には税抜として記入済み）なのに税区分が「読めない/税込」のまま残っている過去分。
