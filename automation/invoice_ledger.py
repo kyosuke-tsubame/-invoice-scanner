@@ -35,7 +35,7 @@ DATA_SHEET = "データ"
 SUMMARY_SHEET = "店舗別集計"
 HEADER = ["日付", "店舗", "仕入先", "金額", "年月", "区分"]
 
-STORE_ORDER = ["本店", "KADODE店", "空港店", "静岡紺屋町店", "セントラル", "冷凍事業部", "製麺事業部"]
+STORE_ORDER = ["本店", "KADODE店", "空港店", "静岡紺屋町店", "セントラル", "冷凍事業部", "製麺事業部", "本部"]
 
 HEADER_FONT = Font(bold=True, color="FFFFFF")
 HEADER_FILL = PatternFill(start_color="1C2340", end_color="1C2340", fill_type="solid")

@@ -34,7 +34,7 @@ import invoice_ledger as L  # noqa: E402
 BASE = Path(__file__).resolve().parent
 NAME_DOC = Path.home() / "Claude/Obsidian/kyosuke-brain/AI/reference/仕入先の正式名称_対応表.md"
 SUPPLIER_MAP = BASE / "仕入先_店舗マップ.txt"
-STORES = ["本店", "KADODE店", "空港店", "静岡紺屋町店", "セントラル", "冷凍事業部", "製麺事業部"]
+STORES = ["本店", "KADODE店", "空港店", "静岡紺屋町店", "セントラル", "冷凍事業部", "製麺事業部", "本部"]
 
 # --- しきい値（2026-09-13時点の実データで決めた。263行・中央値7,900円・最大210,905円）---
 MAX_REASONABLE = 500_000     # 1枚でこれを超えたら桁の読み違いを疑う
@@ -167,7 +167,7 @@ def check(entry, rows=None, today=None):
     if not store:
         hard.append("店舗が空")
     elif store not in STORES:
-        hard.append(f"店舗『{store}』が7店舗のいずれでもない")
+        hard.append(f"店舗『{store}』が対象の店舗（7店舗＋本部）のいずれでもない")
     else:
         if supplier in no_auto:
             soft.append(f"{supplier}は複数店舗に納品があり自動判定しない設定。店舗が正しいか要確認")

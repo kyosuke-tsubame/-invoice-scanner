@@ -16,7 +16,7 @@ from pathlib import Path
 
 MIHON_ROOT = Path(__file__).resolve().parent / "見本"
 # 仕分け先と同じ7店舗。ここに無い店舗名は受け付けない（打ち間違い・表記ゆれ対策）
-STORES = {"本店", "KADODE店", "空港店", "静岡紺屋町店", "セントラル", "冷凍事業部", "製麺事業部"}
+STORES = {"本店", "KADODE店", "空港店", "静岡紺屋町店", "セントラル", "冷凍事業部", "製麺事業部", "本部"}
 
 
 def main():

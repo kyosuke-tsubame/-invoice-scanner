@@ -33,8 +33,8 @@ python3 "$PROJECT_DIR/pull_app_uploads.py" >> "$LOG_DIR/pull_app_uploads.log" 2>
 # 受信箱の新着写真を店舗フォルダへ仕分けてから読み取りに進む
 "$PROJECT_DIR/run_invoice_sort.sh"
 
-STORES=("本店" "KADODE店" "空港店" "静岡紺屋町店" "セントラル" "冷凍事業部" "製麺事業部")
-STORE_LIST_TEXT="本店、KADODE店、空港店、静岡紺屋町店、セントラル、冷凍事業部、製麺事業部"
+STORES=("本店" "KADODE店" "空港店" "静岡紺屋町店" "セントラル" "冷凍事業部" "製麺事業部" "本部")
+STORE_LIST_TEXT="本店、KADODE店、空港店、静岡紺屋町店、セントラル、冷凍事業部、製麺事業部、本部"
 
 # iPhoneのHEIC画像をJPEGに変換しておく（読み取りエンジンが確実に読めるように）
 # 店舗フォルダの直下だけでなく、仕分けで作られる「仕入先/年月」の奥のフォルダも対象にする
@@ -373,7 +373,7 @@ import json, glob, os
 
 STATE_FILE = '$STATE_FILE'
 PHOTOS_ROOT = '$PHOTOS_ROOT'
-STORES = ['本店', 'KADODE店', '空港店', '静岡紺屋町店', 'セントラル', '冷凍事業部', '製麺事業部']
+STORES = ['本店', 'KADODE店', '空港店', '静岡紺屋町店', 'セントラル', '冷凍事業部', '製麺事業部', '本部']
 
 with open(STATE_FILE) as f:
     state = json.load(f)

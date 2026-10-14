@@ -79,7 +79,7 @@ SUPPLIER_MAP_RULES=$(grep -v '^!' "$SUPPLIER_MAP_FILE" | grep -v '^>')
 NO_AUTO_STORE=$(grep '^!' "$SUPPLIER_MAP_FILE" | sed 's/^!//' | paste -sd '、' -)
 REBILL_RULES=$(grep '^>' "$SUPPLIER_MAP_FILE" | sed 's/^>//')
 STORE_ADDR=$(cat "$STORE_ADDR_FILE" 2>/dev/null)
-STORE_LIST_TEXT="本店、KADODE店、空港店、静岡紺屋町店、セントラル、冷凍事業部、製麺事業部"
+STORE_LIST_TEXT="本店、KADODE店、空港店、静岡紺屋町店、セントラル、冷凍事業部、製麺事業部、本部"
 ALLOWED_TOOLS="Read,Bash(python3 ${MOVE_SCRIPT}:*),Bash(python3 move_sorted.py:*)"
 
 TOTAL=${#TARGET_FILES[@]}
@@ -125,13 +125,13 @@ ${MIHON_DIR}/<仕入先名>/<店舗名>/ に見本（店舗が確定済みの手
    ${SUPPLIER_MAP_RULES}
 4. ここまでで決まらず、宛名が『燕』『麺屋燕』『TUBAMEカンパニー』など会社全体を指すだけ
    → 本店とみなす（信頼度：低）
-5. それでも決まらない → 『不明』
+5. それでも決まらない → 『本部』
 
 【店舗ごとの住所・目印】
 ${STORE_ADDR}
 
 【店舗を自動判定しない仕入先】
-次の仕入先は複数店舗に納品があるため、手順1で店舗名が読めなかった場合は手順4を使わず必ず『不明』にする。
+次の仕入先は複数店舗に納品があるため、手順1で店舗名が読めなかった場合は手順4を使わず必ず『本部』にする。
 対象：${NO_AUTO_STORE}
 
 【届け先と仕入れの計上先が違う仕入先】
@@ -140,13 +140,13 @@ ${REBILL_RULES}
 
 【手順3：移動が必要かどうか】
 判定した店舗が『${TARGET_STORE}』と同じなら、何もしない（移動しない）。
-違う店舗、または『不明』になった場合だけ、次のコマンドで移動する。
+違う店舗（『本部』を含む）になった場合だけ、次のコマンドで移動する。
 
-   python3 ${MOVE_SCRIPT} <元画像の絶対パス> <判定した店舗 or 不明> <仕入先名 or 不明> <年月 YYYY-MM or 不明> <yes(信頼度が低い場合) または no>
+   python3 ${MOVE_SCRIPT} <元画像の絶対パス> <判定した店舗 or 本部> <仕入先名 or 不明> <年月 YYYY-MM or 不明> <yes(信頼度が低い場合) または no>
 
 年月は伝票日付から YYYY-MM 形式で読む。読めなければ『不明』を渡す。
 
-対象店舗（7つ）：${STORE_LIST_TEXT}
+対象（7店舗＋本部）：${STORE_LIST_TEXT}
 
 【重要】
 ・確信が持てないときは動かさない。今のフォルダのままにして、報告に『判断できず』と書く。

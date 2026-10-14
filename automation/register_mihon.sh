@@ -34,7 +34,7 @@ python3 - "$PHOTOS_ROOT" "$MIHON_DIR" "$CANDIDATES" > "$WORK_FILE" <<'PY'
 import os, sys
 
 photos_root, mihon_dir, n_cand = sys.argv[1], sys.argv[2], int(sys.argv[3])
-STORES = ["本店", "KADODE店", "空港店", "静岡紺屋町店", "セントラル", "冷凍事業部", "製麺事業部"]
+STORES = ["本店", "KADODE店", "空港店", "静岡紺屋町店", "セントラル", "冷凍事業部", "製麺事業部", "本部"]
 EXT = (".jpg", ".jpeg", ".png")
 
 for store in STORES:

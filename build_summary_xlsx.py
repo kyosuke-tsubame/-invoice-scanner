@@ -23,7 +23,7 @@ LEDGER = os.path.join(ONEDRIVE, "納品書集計", "納品書集計.xlsx")
 OUTPUT = os.path.join(ONEDRIVE, "納品書集計", "納品書_集計表.xlsx")
 NAME_TABLE = os.path.join(ONEDRIVE, "納品書写真", "_仕入先の正式名称.txt")
 
-STORE_ORDER = ["本店", "KADODE店", "空港店", "静岡紺屋町店", "セントラル", "製麺事業部", "冷凍事業部"]
+STORE_ORDER = ["本店", "KADODE店", "空港店", "静岡紺屋町店", "セントラル", "製麺事業部", "冷凍事業部", "本部"]
 # 正式名称表に無いが台帳に出てくる別表記（英字表記・運営会社名など）
 EXTRA_ALIASES = {"MonotaRO": "モノタロウ", "世亜企画": "韓国市場"}
 
